@@ -6,6 +6,7 @@ Web-App zur Gesichtsbearbeitung. Läuft komplett im Browser (Smartphone und PC).
 
 | Bereich | Was es macht |
 |---|---|
+| **Looks** | Fertige Filter mit einem Tipp: Natürlich, Glamour, Puppig, Intensiv, Sonnig, Gepflegt, Vollbart, Lächeln, Klassik (Schwarzweiß), jeweils mit Stärke-Regler |
 | **Haut** | Glätten (kantenerhaltend, nur auf Hautflächen), Strahlen, Zähne aufhellen |
 | **Make-up** | Lippenstift, Rouge, Lidschatten, jeweils mit Farbwahl |
 | **Augen** | Augenfarbe (Pupille bleibt dunkel), Augen vergrößern |

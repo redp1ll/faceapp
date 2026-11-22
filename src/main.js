@@ -1,6 +1,7 @@
 import { analyze } from './analysis.js';
 import { FACE_DEFAULTS, GLOBAL_DEFAULTS, isFaceKey, newState, render } from './render.js';
 import { detect, loadModels } from './vision.js';
+import { LOOKS, applyLook } from './presets.js';
 
 const MAX_SIDE = 1600;
 
@@ -14,6 +15,7 @@ const PALETTES = {
 };
 
 const TABS = [
+  { id: 'looks', label: 'Looks', face: true, controls: [] },
   { id: 'skin', label: 'Haut', face: true, controls: [
     { key: 'smooth', label: 'Glätten' },
     { key: 'glow', label: 'Strahlen' },
@@ -62,7 +64,8 @@ let highlightUntil = 0;
 // Settings of the selected face, or the photo-wide ones (hair, light).
 const bag = (key) => (isFaceKey(key) ? state.faces[sel] : state.global);
 const defaultOf = (key) => (isFaceKey(key) ? FACE_DEFAULTS : GLOBAL_DEFAULTS)[key];
-let activeTab = 'skin';
+let activeTab = 'looks';
+let lookThumbs = null; // { sel, urls } preview images for the selected face
 let compare = false;
 let split = 0.5;
 let renderQueued = false;
@@ -112,6 +115,7 @@ function buildControls() {
     box.innerHTML = '<p class="hint">Auf diesem Foto wurden keine Haare erkannt.</p>';
     return;
   }
+  if (tab.id === 'looks') return buildLooks(box);
   for (const c of tab.controls) {
     const wrap = document.createElement('div');
     wrap.className = 'control';
@@ -165,6 +169,90 @@ function buildControls() {
       sw.append(custom);
       wrap.append(sw);
     }
+    box.append(wrap);
+  }
+}
+
+// ------------------------------------------------------------------ looks ---
+function cropFace(canvas, F, size) {
+  const [x0, y0, x1, y1] = F.tight;
+  const side = Math.max(x1 - x0, y1 - y0) * 1.15;
+  const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+  const c = document.createElement('canvas');
+  c.width = c.height = size;
+  c.getContext('2d').drawImage(canvas, cx - side / 2, cy - side / 2, side, side, 0, 0, size, size);
+  return c;
+}
+
+// Render each look on the selected face, one per frame so the UI stays responsive.
+function makeLookThumbs() {
+  const forSel = sel, forA = A;
+  lookThumbs = { sel, A, urls: {} };
+  const tmpCanvas = document.createElement('canvas');
+  tmpCanvas.width = A.w;
+  tmpCanvas.height = A.h;
+  const queue = [...LOOKS];
+  const step = () => {
+    if (!lookThumbs || lookThumbs.sel !== forSel || lookThumbs.A !== forA || !queue.length) return;
+    const look = queue.shift();
+    const st = structuredClone(state);
+    applyLook(look, 100, st.faces[forSel], st.global, FACE_DEFAULTS, GLOBAL_DEFAULTS);
+    tmpCanvas.getContext('2d').putImageData(new ImageData(render(A, st), A.w, A.h), 0, 0);
+    lookThumbs.urls[look.id] = cropFace(tmpCanvas, A.faces[forSel], 160).toDataURL('image/jpeg', 0.85);
+    const img = document.querySelector(`.look[data-id="${look.id}"] img`);
+    if (img) img.src = lookThumbs.urls[look.id];
+    setTimeout(step, 0);
+  };
+  setTimeout(step, 30);
+}
+
+function buildLooks(box) {
+  if (!lookThumbs || lookThumbs.sel !== sel || lookThumbs.A !== A) makeLookThumbs();
+  const face = state.faces[sel];
+  const grid = document.createElement('div');
+  grid.className = 'looks';
+  const origUrl = cropFace(original, A.faces[sel], 160).toDataURL('image/jpeg', 0.85);
+  const items = [{ id: null, name: 'Original' }, ...LOOKS];
+  for (const look of items) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'look';
+    if (look.id) b.dataset.id = look.id;
+    b.setAttribute('aria-pressed', String((face.look ?? null) === look.id));
+    const src = look.id ? lookThumbs.urls[look.id] || '' : origUrl;
+    b.innerHTML = `<span class="look-img"><img alt="" ${src ? `src="${src}"` : ''} /></span><span class="look-name">${look.name}</span>`;
+    b.onclick = () => {
+      if (look.id) {
+        applyLook(look, 100, face, state.global, FACE_DEFAULTS, GLOBAL_DEFAULTS);
+        face.look = look.id;
+        face.lookStrength = 100;
+      } else {
+        Object.assign(face, FACE_DEFAULTS, { look: null });
+        for (const k of ['brightness', 'contrast', 'saturation', 'warmth']) state.global[k] = GLOBAL_DEFAULTS[k];
+      }
+      buildControls();
+      scheduleRender();
+    };
+    grid.append(b);
+  }
+  box.append(grid);
+
+  if (face.look) {
+    const look = LOOKS.find((l) => l.id === face.look);
+    const wrap = document.createElement('div');
+    wrap.className = 'control';
+    wrap.innerHTML = `
+      <div class="control-head"><label for="ctl-lookStrength">Stärke: ${look.name}</label><output>${face.lookStrength}</output></div>
+      <input id="ctl-lookStrength" type="range" min="0" max="100" step="1" value="${face.lookStrength}" />
+      <p class="hint small">Feinschliff geht in den anderen Reitern.</p>`;
+    const input = wrap.querySelector('input');
+    input.addEventListener('input', () => {
+      face.lookStrength = Number(input.value);
+      wrap.querySelector('output').textContent = input.value;
+      applyLook(look, face.lookStrength, face, state.global, FACE_DEFAULTS, GLOBAL_DEFAULTS);
+      face.look = look.id;
+      scheduleRender();
+    });
     box.append(wrap);
   }
 }
