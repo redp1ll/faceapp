@@ -6,10 +6,11 @@ Web-App zur Gesichtsbearbeitung. Läuft komplett im Browser (Smartphone und PC).
 
 | Bereich | Was es macht |
 |---|---|
-| **Looks** | Fertige Filter mit einem Tipp: Natürlich, Glamour, Puppig, Intensiv, Sonnig, Gepflegt, Vollbart, Lächeln, Klassik (Schwarzweiß), jeweils mit Stärke-Regler |
-| **Haut** | Glätten (kantenerhaltend, nur auf Hautflächen), Strahlen, Zähne aufhellen |
+| **Looks** | Fertige Kombinationen aus Retusche und Farbfilter: Natürlich, Frisch, Weich, Glamour, Film, Kino, Gepflegt, Vollbart, Lächeln, Schwarzweiß, jeweils mit Stärke-Regler |
+| **Filter** | Farb-Looks fürs ganze Foto: Klar, Golden, Film, Kino, Pastell, Kühl, Matt, Vintage, Noir, S/W weich, mit Stärke-Regler |
+| **Haut** | Glätten (Poren bleiben erhalten), Augenringe aufhellen, Strahlen, Zähne aufhellen |
 | **Make-up** | Lippenstift, Rouge, Lidschatten, jeweils mit Farbwahl |
-| **Augen** | Augenfarbe (Pupille bleibt dunkel), Augen vergrößern |
+| **Augen** | Leuchten (Augenweiß aufhellen, Iris schärfen), Augenfarbe (Pupille bleibt dunkel), Augen vergrößern |
 | **Haare** | Haarfarbe ändern, Schattierung bleibt erhalten |
 | **Bart** | Bartstoppeln bis Vollbart, folgt der Wuchsrichtung |
 | **Form** | Gesicht schmaler, Nase schmaler, Lächeln, Kinnlänge |
@@ -37,6 +38,8 @@ Die App in Safari öffnen, dann **Teilen → Zum Home-Bildschirm**. Danach start
 - **Haare und Gesichtshaut:** Der MediaPipe-Segmentierer `selfie_multiclass_256x256` trennt Haare, Gesichtshaut und Hintergrund.
 - **Masken:** Aus den Punkten werden weiche Masken für Haut, Lippen, Iris, Lidschatten, Rouge und Bart berechnet (`src/analysis.js`).
 - **Lokale Bearbeitung:** Markierungen und Verformungen werden als Pinselstriche relativ zur Bildbreite gespeichert, gelten also auch beim Speichern in voller Auflösung (`src/local.js`). Zoom und Verschieben in `src/viewport.js`.
+- **Hautglättung:** Frequenztrennung wie in Retusche-Apps. Unebenheiten mittlerer Größe (Flecken, Rötungen) werden geglättet, feine Struktur wie Poren bleibt (`src/render.js`).
+- **Filter:** Tonkurven pro Farbkanal, Split-Toning für Schatten und Lichter, Vibrance, Vignette. Hauttöne werden dabei geschont (`src/filters.js`).
 - **Effekte:** Umfärben über die Luminanz, Multiplizieren oder Weichzeichnen (`src/render.js`). Gesichtsform über glatte lokale Verformungen (`src/warp.js`).
 
 Alle Modelle stehen unter Apache-2.0. Es gibt keinen Server und keine Cloud-API.

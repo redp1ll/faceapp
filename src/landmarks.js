@@ -16,6 +16,10 @@ export const LID_L = [263, 466, 388, 387, 386, 385, 384, 398, 362];
 export const BROW_LOWER_R = [46, 53, 52, 65, 55];
 export const BROW_LOWER_L = [276, 283, 282, 295, 285];
 
+// Lower eyelids, outer corner -> inner corner.
+export const LOWER_LID_R = [33, 7, 163, 144, 145, 153, 154, 155, 133];
+export const LOWER_LID_L = [263, 249, 390, 373, 374, 380, 381, 382, 362];
+
 export const BROW_R = [70, 63, 105, 66, 107, 55, 65, 52, 53, 46];
 export const BROW_L = [300, 293, 334, 296, 336, 285, 295, 282, 283, 276];
 

@@ -5,9 +5,11 @@ import { clamp01, hexToRgb, lum, setLum, smoothstep } from './imageops.js';
 import { beardLayer } from './beard.js';
 import { applyWarps, buildWarps } from './warp.js';
 import { applyPushes, areaMask } from './local.js';
+import { applyFilter, skinness } from './filters.js';
 
 export const FACE_DEFAULTS = {
-  smooth: 0, glow: 0, teeth: 0,
+  smooth: 0, glow: 0, underEye: 0, teeth: 0,
+  eyesBright: 0,
   lip: 0, lipColor: '#b3263e',
   blush: 0, blushColor: '#e0707a',
   shadow: 0, shadowColor: '#7a5a8c',
@@ -21,6 +23,7 @@ export const FACE_DEFAULTS = {
 export const GLOBAL_DEFAULTS = {
   hair: 0, hairColor: '#d9b26f',
   brightness: 0, contrast: 0, saturation: 0, warmth: 0,
+  filter: null, filterStrength: 0,
 };
 
 export const isFaceKey = (k) => k in FACE_DEFAULTS;
@@ -38,6 +41,8 @@ export function newState(A) {
 
 // Older saved edits predate local edits.
 export function upgradeState(st, A) {
+  st.global = { ...GLOBAL_DEFAULTS, ...st.global };
+  st.faces = st.faces.map((f) => ({ ...FACE_DEFAULTS, ...f }));
   st.areas ??= A.faces.map(() => []);
   st.pushes ??= [];
   return st;
@@ -124,28 +129,78 @@ function scale(settings) {
 }
 
 function renderFace(o, F, w, s) {
+  // Frequency separation: blemishes and blotches (mid band) are flattened,
+  // pores and fine texture (high band) stay, so skin doesn't turn to wax.
+  // Strong mid-band edges (nostrils, deep shadows) are protected.
   if (s.smooth) {
-    const b = F.smooth;
+    const S = F.blurS, Lg = F.blurL;
     eachInBox(F, w, (li, gi) => {
       const m = F.skin[li];
       if (m < 0.004) return;
       const j = gi * 3, k3 = li * 3;
-      const dr = b[k3] - o[j], dg = b[k3 + 1] - o[j + 1], db = b[k3 + 2] - o[j + 2];
-      const d = Math.abs(lum(dr, dg, db));
-      const k = m * s.smooth * 0.95 * Math.exp(-(d * d) / 0.006);
-      o[j] += dr * k;
-      o[j + 1] += dg * k;
-      o[j + 2] += db * k;
+      const a = m * s.smooth;
+      const mr = S[k3] - Lg[k3], mg = S[k3 + 1] - Lg[k3 + 1], mb = S[k3 + 2] - Lg[k3 + 2];
+      const ml = lum(mr, mg, mb);
+      const guard = Math.exp(-(ml * ml) / 0.012);
+      const kMid = a * 0.92 * guard, kFine = a * 0.18;
+      o[j] -= mr * kMid + (o[j] - S[k3]) * kFine;
+      o[j + 1] -= mg * kMid + (o[j + 1] - S[k3 + 1]) * kFine;
+      o[j + 2] -= mb * kMid + (o[j + 2] - S[k3 + 2]) * kFine;
     });
   }
+  // Under-eye: lift the low-frequency darkness toward the cheek brightness;
+  // texture rides along untouched.
+  if (s.underEye) {
+    const Lg = F.blurL, ref = F.cheekL;
+    eachInBox(F, w, (li, gi) => {
+      const m = F.underEye[li];
+      if (m < 0.004) return;
+      const k3 = li * 3, j = gi * 3;
+      const l = lum(Lg[k3], Lg[k3 + 1], Lg[k3 + 2]);
+      if (l >= ref || l <= 0.01) return;
+      const k = Math.min(1.6, ref / l) - 1;
+      const a = m * s.underEye * 0.85 * k;
+      // Also pull the bluish/purple cast toward neutral skin.
+      const avg = (Lg[k3] + Lg[k3 + 1] + Lg[k3 + 2]) / 3;
+      o[j] += Lg[k3] * a;
+      o[j + 1] += Lg[k3 + 1] * a;
+      o[j + 2] += Lg[k3 + 2] * a - Math.max(0, Lg[k3 + 2] - avg) * m * s.underEye * 0.5;
+    });
+  }
+  // Glow: luminance-only highlight lift, so skin gets brighter without
+  // shifting toward orange.
   if (s.glow) {
     eachInBox(F, w, (li, gi) => {
-      const m = F.skin[li] * s.glow * 0.22;
-      if (m < 0.002) return;
+      const m = F.skin[li];
+      if (m < 0.004) return;
       const j = gi * 3;
-      o[j] += (1 - o[j]) * m;
-      o[j + 1] += (1 - o[j + 1]) * m * 0.97;
-      o[j + 2] += (1 - o[j + 2]) * m * 0.95;
+      const l = lum(o[j], o[j + 1], o[j + 2]);
+      if (l <= 0.01) return;
+      const lift = m * s.glow * 0.16 * (1 - l) * smoothstep(0.1, 0.65, l);
+      const k = (l + lift) / l;
+      o[j] *= k;
+      o[j + 1] *= k;
+      o[j + 2] *= k;
+    });
+  }
+  // Eyes: brighten and slightly neutralise the whites, add crispness to the iris.
+  if (s.eyesBright) {
+    const S = F.blurS;
+    eachInBox(F, w, (li, gi) => {
+      const e = F.eyes[li];
+      if (e < 0.01) return;
+      const j = gi * 3, k3 = li * 3;
+      const a = e * s.eyesBright;
+      const ir = F.iris[li];
+      // Gentle local contrast on the iris only; lashes and lids stay as they are.
+      const sh = a * ir * 0.45;
+      if (sh > 0.002) for (let c = 0; c < 3; c++) o[j + c] += (o[j + c] - S[k3 + c]) * sh;
+      const l = lum(o[j], o[j + 1], o[j + 2]);
+      const white = a * (1 - ir) * smoothstep(0.28, 0.6, l);
+      for (let c = 0; c < 3; c++) {
+        const v = l + (o[j + c] - l) * (1 - 0.5 * white);
+        o[j + c] = v + (1 - v) * 0.22 * white;
+      }
     });
   }
   if (s.teeth) {
@@ -206,18 +261,35 @@ export function render(A, state) {
     }
   }
 
-  // Global light & colour.
+  // Global light & colour. Warmth is a white-balance shift (multiplies
+  // channels), brightness a gamma lift, contrast a gentle S-curve and positive
+  // saturation acts like vibrance; none of them clip hard.
   if (g.brightness || g.contrast || g.saturation || g.warmth) {
-    const b = g.brightness * 0.2, k = 1 + g.contrast * 0.6, sat = 1 + g.saturation, t = g.warmth * 0.07;
+    const gamma = Math.pow(2, -g.brightness * 0.6);
+    const c = g.contrast * 0.9;
+    const wr = 1 + g.warmth * 0.1, wg = 1 + g.warmth * 0.015, wb = 1 - g.warmth * 0.12;
+    const sat = g.saturation;
     for (let i = 0; i < n; i++) {
       const j = i * 3;
-      tmpC[0] = o[j] + b + t;
-      tmpC[1] = o[j + 1] + b + t * 0.15;
-      tmpC[2] = o[j + 2] + b - t;
-      const l = lum(tmpC[0], tmpC[1], tmpC[2]);
-      for (let c = 0; c < 3; c++) o[j + c] = (l + (tmpC[c] - l) * sat - 0.5) * k + 0.5;
+      for (let k = 0; k < 3; k++) {
+        let x = clamp01(o[j + k] * (k === 0 ? wr : k === 1 ? wg : wb));
+        if (gamma !== 1) x = Math.pow(x, gamma);
+        if (c) x += c * 2 * x * (1 - x) * (x - 0.5) * (c > 0 ? 1 : 1.6);
+        o[j + k] = x;
+      }
+      if (sat) {
+        const r = o[j], gg = o[j + 1], b = o[j + 2];
+        const l = lum(r, gg, b);
+        const chroma = Math.max(r, gg, b) - Math.min(r, gg, b);
+        const k = sat > 0 ? 1 + sat * (1 - Math.min(1, chroma * 1.8)) * (1 - 0.7 * skinness(r, gg, b)) : 1 + sat;
+        o[j] = l + (r - l) * k;
+        o[j + 1] = l + (gg - l) * k;
+        o[j + 2] = l + (b - l) * k;
+      }
     }
   }
+
+  if (g.filter && g.filterStrength) applyFilter(o, w, h, g.filter, g.filterStrength);
 
   let out = new Uint8ClampedArray(n * 4);
   for (let i = 0; i < n; i++) {

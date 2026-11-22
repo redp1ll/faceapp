@@ -5,6 +5,7 @@ import { createViewport } from './viewport.js';
 import { detect, loadModels, resample } from './vision.js';
 import { deleteEdit, getOriginal, listEdits, saveEdit, saveOriginal } from './gallery.js';
 import { LOOKS, applyLook } from './presets.js';
+import { FILTERS, applyFilter } from './filters.js';
 
 // Editing happens on a preview of at most 1600 px so sliders react
 // instantly; saving re-renders at full resolution (up to ~12.6 MP, which
@@ -24,8 +25,10 @@ const PALETTES = {
 
 const TABS = [
   { id: 'looks', label: 'Looks', face: true, controls: [] },
+  { id: 'filter', label: 'Filter', controls: [] },
   { id: 'skin', label: 'Haut', face: true, controls: [
     { key: 'smooth', label: 'Glätten' },
+    { key: 'underEye', label: 'Augenringe' },
     { key: 'glow', label: 'Strahlen' },
     { key: 'teeth', label: 'Zähne aufhellen' },
   ] },
@@ -35,6 +38,7 @@ const TABS = [
     { key: 'shadow', label: 'Lidschatten', color: 'shadowColor' },
   ] },
   { id: 'eyes', label: 'Augen', face: true, controls: [
+    { key: 'eyesBright', label: 'Leuchten' },
     { key: 'iris', label: 'Augenfarbe', color: 'irisColor' },
     { key: 'eyeSize', label: 'Größe' },
   ] },
@@ -144,6 +148,7 @@ function buildControls() {
     return;
   }
   if (tab.id === 'looks') return buildLooks(box);
+  if (tab.id === 'filter') return buildFilters(box);
   if (tab.id === 'area') return buildArea(box);
   if (tab.id === 'warp') return buildWarp(box);
   if (tab.face && state.areas[sel]?.length && !areaMask(A.faces[sel], state.areas[sel], A.w)?.empty) {
@@ -414,7 +419,7 @@ function buildLooks(box) {
         face.lookStrength = 100;
       } else {
         Object.assign(face, FACE_DEFAULTS, { look: null });
-        for (const k of ['brightness', 'contrast', 'saturation', 'warmth']) state.global[k] = GLOBAL_DEFAULTS[k];
+        for (const k of ['brightness', 'contrast', 'saturation', 'warmth', 'filter', 'filterStrength']) state.global[k] = GLOBAL_DEFAULTS[k];
       }
       buildControls();
       scheduleRender();
@@ -423,8 +428,8 @@ function buildLooks(box) {
   }
   box.append(grid);
 
-  if (face.look) {
-    const look = LOOKS.find((l) => l.id === face.look);
+  const look = face.look && LOOKS.find((l) => l.id === face.look);
+  if (look) {
     const wrap = document.createElement('div');
     wrap.className = 'control';
     wrap.innerHTML = `
@@ -437,6 +442,71 @@ function buildLooks(box) {
       wrap.querySelector('output').textContent = input.value;
       applyLook(look, face.lookStrength, face, state.global, FACE_DEFAULTS, GLOBAL_DEFAULTS);
       face.look = look.id;
+      scheduleRender();
+    });
+    box.append(wrap);
+  }
+}
+
+// ---------------------------------------------------------------- filters ---
+// Thumbnails: the filter applied to a small crop of the photo (the selected
+// face, or the centre when there is none).
+let filterThumbs = null; // { A, sel, urls }
+function filterThumb(f) {
+  const size = 160;
+  let c;
+  if (A.faces.length) c = cropFace(original, A.faces[sel], size);
+  else {
+    c = document.createElement('canvas');
+    c.width = c.height = size;
+    const side = Math.min(A.w, A.h);
+    c.getContext('2d').drawImage(original, (A.w - side) / 2, (A.h - side) / 2, side, side, 0, 0, size, size);
+  }
+  if (!f) return c.toDataURL('image/jpeg', 0.85);
+  const ctx = c.getContext('2d');
+  const img = ctx.getImageData(0, 0, size, size);
+  const n = size * size, rgb = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) for (let k = 0; k < 3; k++) rgb[i * 3 + k] = img.data[i * 4 + k] / 255;
+  applyFilter(rgb, size, size, f.id, 1);
+  for (let i = 0; i < n; i++) for (let k = 0; k < 3; k++) img.data[i * 4 + k] = rgb[i * 3 + k] * 255;
+  ctx.putImageData(img, 0, 0);
+  return c.toDataURL('image/jpeg', 0.85);
+}
+
+function buildFilters(box) {
+  if (!filterThumbs || filterThumbs.A !== A || filterThumbs.sel !== sel) {
+    filterThumbs = { A, sel, urls: { none: filterThumb(null) } };
+    for (const f of FILTERS) filterThumbs.urls[f.id] = filterThumb(f);
+  }
+  const g = state.global;
+  const grid = document.createElement('div');
+  grid.className = 'looks';
+  for (const f of [{ id: null, name: 'Ohne' }, ...FILTERS]) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'look';
+    b.setAttribute('aria-pressed', String((g.filter ?? null) === f.id));
+    b.innerHTML = `<span class="look-img"><img alt="" src="${filterThumbs.urls[f.id ?? 'none']}" /></span><span class="look-name">${f.name}</span>`;
+    b.onclick = () => {
+      g.filter = f.id;
+      g.filterStrength = f.id ? (g.filterStrength || 80) : 0;
+      buildControls();
+      scheduleRender();
+    };
+    grid.append(b);
+  }
+  box.append(grid);
+  const f = FILTERS.find((x) => x.id === g.filter);
+  if (f) {
+    const wrap = document.createElement('div');
+    wrap.className = 'control';
+    wrap.innerHTML = `
+      <div class="control-head"><label for="ctl-filterStrength">Stärke: ${f.name}</label><output>${g.filterStrength}</output></div>
+      <input id="ctl-filterStrength" type="range" min="0" max="100" step="1" value="${g.filterStrength}" />`;
+    const input = wrap.querySelector('input');
+    input.addEventListener('input', () => {
+      g.filterStrength = Number(input.value);
+      wrap.querySelector('output').textContent = input.value;
       scheduleRender();
     });
     box.append(wrap);

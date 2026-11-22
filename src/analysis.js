@@ -195,18 +195,39 @@ function analyzeFace(rgb, w, h, pts, faceSkin) {
   F.beard = beard;
   F.beardLayer = buildBeard({ beard, fw, down, pts: lp }, bw, bh);
 
-  // --- pre-blurred crop for edge-aware smoothing ----------------------------
-  const chans = [0, 1, 2].map((c) => {
-    const a = new Float32Array(n);
-    for (let i = 0; i < n; i++) a[i] = crop[i * 3 + c];
-    return blur(a, bw, bh, Math.max(2, fw / 55));
+  // --- eyes: whites and irises for "Leuchten" ------------------------------
+  F.eyes = eyesHard;
+  F.cheekL = meanLum(crop, blush, 0.3) || meanLum(crop, skin, 0.6);
+
+  // --- under-eye band for "Augenringe" --------------------------------------
+  const underPolys = [L.LOWER_LID_R, L.LOWER_LID_L].map((idx) => {
+    const lid = poly(idx);
+    const k = lid.length - 1;
+    const low = lid.map((p, i) => add(p, mul(down, fw * (0.03 + 0.11 * Math.sin((Math.PI * i) / k)))));
+    return [...lid, ...low.reverse()];
   });
-  const smooth = new Float32Array(n * 3);
-  for (let i = 0; i < n; i++) {
-    smooth[i * 3] = chans[0][i];
-    smooth[i * 3 + 1] = chans[1][i];
-    smooth[i * 3 + 2] = chans[2][i];
-  }
-  F.smooth = smooth;
+  const under = polygonMask(underPolys, bw, bh, fw * 0.03);
+  for (let i = 0; i < n; i++) under[i] *= skin[i];
+  F.underEye = under;
+
+  // --- frequency bands for texture-preserving smoothing ---------------------
+  // blurS keeps pores and fine texture (img - blurS), blurL holds the shape
+  // and shading; blemishes and unevenness live in between (blurS - blurL).
+  const bands = (radius) => {
+    const chans = [0, 1, 2].map((c) => {
+      const a = new Float32Array(n);
+      for (let i = 0; i < n; i++) a[i] = crop[i * 3 + c];
+      return blur(a, bw, bh, radius);
+    });
+    const out = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) {
+      out[i * 3] = chans[0][i];
+      out[i * 3 + 1] = chans[1][i];
+      out[i * 3 + 2] = chans[2][i];
+    }
+    return out;
+  };
+  F.blurS = bands(Math.max(1, fw / 220));
+  F.blurL = bands(Math.max(3, fw / 26));
   return F;
 }
