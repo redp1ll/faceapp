@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#14110f" />
+    <title>Facette – Gesichter bearbeiten</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 2 29 12 23 30H9L3 12z' fill='%23ff7a59'/%3E%3Cpath d='M16 2v28M3 12h26' stroke='%2314110f' stroke-width='1.6'/%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="./src/style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M16 2 29 12 23 30H9L3 12z" /><path class="cut" d="M16 2v28M3 12h26" /></svg>
+        <span>Facette</span>
+      </div>
+      <div class="actions">
+        <button id="btn-open" class="ghost" type="button">Neues Foto</button>
+        <button id="btn-save" class="primary" type="button" disabled>Speichern</button>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="stage" id="stage">
+        <div class="empty" id="empty">
+          <div class="empty-card">
+            <svg viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="26" r="13" /><path d="M10 58c3-12 12-18 22-18s19 6 22 18" /></svg>
+            <h1>Porträt auswählen</h1>
+            <p>Lade ein Foto mit gut sichtbarem Gesicht hoch oder ziehe es hierher.</p>
+            <div class="empty-actions">
+              <button id="btn-pick" class="primary" type="button">Foto auswählen</button>
+              <button id="btn-camera" class="ghost" type="button">Kamera</button>
+            </div>
+            <p class="privacy">Alles wird direkt auf deinem Gerät berechnet. Dein Foto wird nirgendwohin hochgeladen.</p>
+          </div>
+        </div>
+        <div class="canvas-wrap" id="canvas-wrap" hidden>
+          <canvas id="view"></canvas>
+        </div>
+        <div class="busy" id="busy" hidden><div class="spinner"></div><span id="busy-text">Gesicht wird analysiert …</span></div>
+        <div class="toast" id="toast" hidden></div>
+      </section>
+
+      <aside class="panel" id="panel" aria-label="Bearbeitung">
+        <nav class="tabs" id="tabs" role="tablist"></nav>
+        <div class="controls" id="controls"></div>
+        <div class="panel-footer">
+          <button id="btn-compare" class="ghost" type="button" disabled aria-pressed="false">Vorher / Nachher</button>
+          <button id="btn-reset" class="ghost" type="button" disabled>Zurücksetzen</button>
+        </div>
+      </aside>
+    </main>
+
+    <input id="file" type="file" accept="image/*" hidden />
+    <input id="camera" type="file" accept="image/*" capture="user" hidden />
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>
