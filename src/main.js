@@ -1,5 +1,7 @@
 import { analyze } from './analysis.js';
-import { FACE_DEFAULTS, GLOBAL_DEFAULTS, isFaceKey, newState, render } from './render.js';
+import { FACE_DEFAULTS, GLOBAL_DEFAULTS, isFaceKey, newState, render, upgradeState } from './render.js';
+import { areaMask } from './local.js';
+import { createViewport } from './viewport.js';
 import { detect, loadModels, resample } from './vision.js';
 import { deleteEdit, getOriginal, listEdits, saveEdit, saveOriginal } from './gallery.js';
 import { LOOKS, applyLook } from './presets.js';
@@ -48,6 +50,8 @@ const TABS = [
     { key: 'smile', label: 'Lächeln' },
     { key: 'chin', label: 'Kinnlänge', min: -100 },
   ] },
+  { id: 'area', label: 'Bereich', face: true, controls: [] },
+  { id: 'warp', label: 'Verformen', controls: [] },
   { id: 'light', label: 'Licht', controls: [
     { key: 'brightness', label: 'Helligkeit', min: -100 },
     { key: 'contrast', label: 'Kontrast', min: -100 },
@@ -79,6 +83,11 @@ const defaultOf = (key) => (perFace(key) ? FACE_DEFAULTS : GLOBAL_DEFAULTS)[key]
 let activeTab = 'looks';
 let lookThumbs = null; // { sel, urls } preview images for the selected face
 let compare = false;
+let brushSize = 44; // brush diameter in screen pixels
+let areaErase = false;
+let history = []; // undo stack of local edits: { type: 'area', face } | { type: 'push', n }
+let cursor = null; // [x, y, r] brush outline in image pixels while drawing
+let panelCollapsed = false;
 let split = 0.5;
 let renderQueued = false;
 
@@ -106,7 +115,14 @@ function buildTabs() {
     b.role = 'tab';
     b.textContent = t.label;
     b.setAttribute('aria-selected', String(t.id === activeTab));
-    b.onclick = () => { activeTab = t.id; buildTabs(); buildControls(); };
+    b.onclick = () => {
+      // Tapping the open tab again folds the panel away to free the photo.
+      setCollapsed(t.id === activeTab ? !panelCollapsed : false);
+      activeTab = t.id;
+      buildTabs();
+      buildControls();
+      draw();
+    };
     nav.append(b);
   }
 }
@@ -128,6 +144,11 @@ function buildControls() {
     return;
   }
   if (tab.id === 'looks') return buildLooks(box);
+  if (tab.id === 'area') return buildArea(box);
+  if (tab.id === 'warp') return buildWarp(box);
+  if (tab.face && state.areas[sel]?.length && !areaMask(A.faces[sel], state.areas[sel], A.w)?.empty) {
+    box.insertAdjacentHTML('beforeend', '<p class="hint small area-note">Wirkt nur im markierten Bereich. Ändern unter „Bereich“.</p>');
+  }
   for (const c of tab.controls) {
     const wrap = document.createElement('div');
     wrap.className = 'control';
@@ -184,6 +205,159 @@ function buildControls() {
     box.append(wrap);
   }
 }
+
+// ----------------------------------------------------------- local tools ---
+function brushControl(box) {
+  const wrap = document.createElement('div');
+  wrap.className = 'control';
+  wrap.innerHTML = `
+    <div class="control-head"><label for="ctl-brush">Pinselgröße</label><output>${brushSize}</output></div>
+    <input id="ctl-brush" type="range" min="12" max="140" step="1" value="${brushSize}" />`;
+  const input = wrap.querySelector('input');
+  input.addEventListener('input', () => {
+    brushSize = Number(input.value);
+    wrap.querySelector('output').textContent = input.value;
+  });
+  box.append(wrap);
+}
+
+function actionRow(box, buttons) {
+  const row = document.createElement('div');
+  row.className = 'tool-row';
+  for (const [label, fn, disabled] of buttons) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'ghost';
+    b.textContent = label;
+    b.disabled = !!disabled;
+    b.onclick = fn;
+    row.append(b);
+  }
+  box.append(row);
+}
+
+function buildArea(box) {
+  const strokes = state.areas[sel];
+  box.insertAdjacentHTML('beforeend', `<p class="hint small">Male mit einem Finger über die Stellen, an denen die Effekte wirken sollen,
+    zum Beispiel nur die Stirn oder eine Wange. Ohne Markierung wirken sie im ganzen Gesicht. Zoomen mit zwei Fingern.</p>`);
+  const seg = document.createElement('div');
+  seg.className = 'segmented';
+  for (const [label, erase] of [['Malen', false], ['Radieren', true]]) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = label;
+    b.setAttribute('aria-pressed', String(areaErase === erase));
+    b.onclick = () => { areaErase = erase; buildControls(); };
+    seg.append(b);
+  }
+  box.append(seg);
+  brushControl(box);
+  actionRow(box, [
+    ['Rückgängig', undo, !history.some((h) => h.type === 'area' && h.face === sel)],
+    ['Markierung löschen', () => {
+      state.areas[sel] = [];
+      history = history.filter((h) => !(h.type === 'area' && h.face === sel));
+      buildControls();
+      scheduleRender();
+    }, !strokes.length],
+  ]);
+}
+
+function buildWarp(box) {
+  box.insertAdjacentHTML('beforeend', `<p class="hint small">Ziehe mit einem Finger, um Bildteile zu verschieben, etwa Kinn, Wangen oder Haare.
+    Kleine Pinsel für feine Korrekturen. Zoomen mit zwei Fingern.</p>`);
+  brushControl(box);
+  actionRow(box, [
+    ['Rückgängig', undo, !history.some((h) => h.type === 'push')],
+    ['Alle Verformungen entfernen', () => {
+      state.pushes = [];
+      history = history.filter((h) => h.type !== 'push');
+      buildControls();
+      scheduleRender();
+    }, !state.pushes.length],
+  ]);
+}
+
+function undo() {
+  const tab = activeTab === 'area' ? 'area' : 'push';
+  for (let i = history.length - 1; i >= 0; i--) {
+    const h = history[i];
+    if (h.type !== tab || (tab === 'area' && h.face !== sel)) continue;
+    history.splice(i, 1);
+    if (h.type === 'area') state.areas[h.face].pop();
+    else state.pushes.splice(state.pushes.length - h.n, h.n);
+    break;
+  }
+  buildControls();
+  scheduleRender();
+}
+
+// Image-pixel radius of the brush at the current zoom.
+function brushRadius() {
+  return (brushSize / 2) * (A.w / view.getBoundingClientRect().width);
+}
+
+let stroke = null; // the stroke or drag in progress
+const tool = {
+  start(e) {
+    const [x, y] = toImage(e);
+    const r = brushRadius();
+    cursor = [x, y, r];
+    if (activeTab === 'area') {
+      const i = faceAt([x, y]);
+      if (i >= 0 && i !== sel) selectFace(i);
+      const st = { e: areaErase, r: r / A.w, p: [x / A.w, y / A.w] };
+      state.areas[sel].push(st);
+      stroke = { type: 'area', st };
+    } else {
+      stroke = { type: 'push', last: [x, y], R: r, n: 0 };
+    }
+    scheduleRender();
+  },
+  move(e) {
+    if (!stroke) return;
+    const [x, y] = toImage(e);
+    cursor = [x, y, cursor[2]];
+    if (stroke.type === 'area') {
+      const p = stroke.st.p;
+      const lx = p[p.length - 2] * A.w, ly = p[p.length - 1] * A.w;
+      if (Math.hypot(x - lx, y - ly) < stroke.st.r * A.w * 0.15) return draw();
+      p.push(x / A.w, y / A.w);
+    } else {
+      // Split the drag into small steps (< 0.4 R) so the warp never folds.
+      const [lx, ly] = stroke.last, R = stroke.R;
+      const d = Math.hypot(x - lx, y - ly);
+      if (d < R * 0.08) return draw();
+      const steps = Math.ceil(d / (R * 0.4));
+      for (let k = 0; k < steps; k++) {
+        const cx = lx + ((x - lx) * k) / steps, cy = ly + ((y - ly) * k) / steps;
+        state.pushes.push({ c: [cx / A.w, cy / A.w], d: [(x - lx) / steps / A.w, (y - ly) / steps / A.w], R: R / A.w });
+      }
+      stroke.n += steps;
+      stroke.last = [x, y];
+    }
+    scheduleRender();
+  },
+  end() {
+    if (!stroke) return;
+    if (stroke.type === 'area') history.push({ type: 'area', face: sel });
+    else if (stroke.n) history.push({ type: 'push', n: stroke.n });
+    stroke = null;
+    cursor = null;
+    buildControls();
+    scheduleRender();
+  },
+  cancel() {
+    if (!stroke) return;
+    if (stroke.type === 'area') state.areas[sel].pop();
+    else state.pushes.splice(state.pushes.length - stroke.n, stroke.n);
+    stroke = null;
+    cursor = null;
+    scheduleRender();
+  },
+};
+
+const toolMode = () => A && (activeTab === 'warp' || (activeTab === 'area' && A.faces.length > 0));
 
 // ------------------------------------------------------------------ looks ---
 function cropFace(canvas, F, size) {
@@ -356,18 +530,61 @@ function refreshThumb() {
   b.classList.toggle('edited', hasEdits(sel));
 }
 
+function outlineFace(alpha) {
+  const poly = A.faces[sel].ovalPoly;
+  vctx.save();
+  vctx.globalAlpha = alpha;
+  vctx.lineWidth = Math.max(2, A.w / view.getBoundingClientRect().width * 2);
+  vctx.setLineDash([vctx.lineWidth * 3, vctx.lineWidth * 2]);
+  vctx.strokeStyle = '#ff7a59';
+  vctx.beginPath();
+  poly.forEach(([x, y], i) => (i ? vctx.lineTo(x, y) : vctx.moveTo(x, y)));
+  vctx.closePath();
+  vctx.stroke();
+  vctx.restore();
+}
+
+// Orange copy of a white mask canvas (cached per source canvas).
+const tintCache = new WeakMap();
+function tinted(src) {
+  let t = tintCache.get(src);
+  if (!t) { t = { c: document.createElement('canvas'), key: '' }; tintCache.set(src, t); }
+  const key = `${src.width}x${src.height}:${areaMask(A.faces[sel], state.areas[sel], A.w).key}`;
+  if (t.key !== key) {
+    t.c.width = src.width;
+    t.c.height = src.height;
+    const ctx = t.c.getContext('2d');
+    ctx.drawImage(src, 0, 0);
+    ctx.globalCompositeOperation = 'source-in';
+    ctx.fillStyle = '#ff5a2a';
+    ctx.fillRect(0, 0, src.width, src.height);
+    t.key = key;
+  }
+  return t.c;
+}
+
 function draw() {
   if (!A) return;
   vctx.drawImage(result, 0, 0);
-  if (!compare && A.faces.length > 1 && performance.now() < highlightUntil) {
-    const poly = A.faces[sel].ovalPoly;
+  if (!compare && A.faces.length > 1 && performance.now() < highlightUntil) outlineFace(1);
+  if (!compare && activeTab === 'area' && A.faces.length) {
+    // Show the painted area as a tinted overlay.
+    const area = areaMask(A.faces[sel], state.areas[sel], A.w);
+    if (area && !area.empty) {
+      vctx.save();
+      vctx.globalAlpha = 0.38;
+      vctx.drawImage(tinted(area.canvas), area.box[0], area.box[1]);
+      vctx.restore();
+    } else {
+      outlineFace(0.5);
+    }
+  }
+  if (cursor && !compare) {
     vctx.save();
-    vctx.lineWidth = Math.max(2, A.w / 300);
-    vctx.setLineDash([vctx.lineWidth * 3, vctx.lineWidth * 2]);
-    vctx.strokeStyle = '#ff7a59';
+    vctx.lineWidth = Math.max(1.5, A.w / view.getBoundingClientRect().width * 1.5);
+    vctx.strokeStyle = 'rgb(255 255 255 / 0.9)';
     vctx.beginPath();
-    poly.forEach(([x, y], i) => (i ? vctx.lineTo(x, y) : vctx.moveTo(x, y)));
-    vctx.closePath();
+    vctx.arc(cursor[0], cursor[1], cursor[2], 0, Math.PI * 2);
     vctx.stroke();
     vctx.restore();
   }
@@ -416,6 +633,8 @@ async function openFile(file, restore = null) {
     const k = Math.min(1, MAX_SIDE / Math.max(iw, ih));
     const w = Math.round(iw * k), h = Math.round(ih * k);
     for (const c of [original, result, view]) { c.width = w; c.height = h; }
+    history = [];
+    cursor = stroke = null;
     const octx = original.getContext('2d', { willReadFrequently: true });
     octx.drawImage(img, 0, 0, w, h);
 
@@ -445,7 +664,7 @@ async function openFile(file, restore = null) {
       if (area > (best[2] - best[0]) * (best[3] - best[1])) sel = i;
     });
     if (restore && restore.state.faces.length === A.faces.length) {
-      state = structuredClone(restore.state);
+      state = upgradeState(structuredClone(restore.state), A);
       sel = Math.min(restore.sel ?? sel, Math.max(0, A.faces.length - 1));
       currentEdit = { id: restore.id, created: restore.created, stored: true, file };
     } else {
@@ -458,6 +677,8 @@ async function openFile(file, restore = null) {
     $('empty').hidden = true;
     document.querySelector('.layout').classList.add('has-photo');
     $('canvas-wrap').hidden = false;
+    vp.fit(w, h);
+    vp.reset(false);
     for (const id of ['btn-save', 'btn-compare', 'btn-reset']) $(id).disabled = false;
     closeGallery();
     if (restore) { /* no hints when reopening */ } else if (!A.faces.length) toast('Kein Gesicht erkannt. Haare und Licht lassen sich trotzdem bearbeiten.');
@@ -599,7 +820,7 @@ let autosaveTimer = 0;
 function anyEdits() {
   if (!state) return false;
   if (Object.keys(GLOBAL_DEFAULTS).some((k) => state.global[k] !== GLOBAL_DEFAULTS[k])) return true;
-  return state.faces.some((_, i) => hasEdits(i));
+  return state.pushes.length > 0 || state.faces.some((_, i) => hasEdits(i));
 }
 
 function queueAutosave() {
@@ -717,6 +938,7 @@ $('btn-sheet-close').onclick = () => ($('export-sheet').hidden = true);
 document.addEventListener('visibilitychange', () => { if (document.hidden) saveNow(); });
 $('btn-reset').onclick = () => {
   state = newState(A);
+  history = [];
   buildFaces();
   buildControls();
   scheduleRender();
@@ -733,18 +955,56 @@ function moveSplit(e) {
   split = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
   draw();
 }
-view.addEventListener('pointerdown', (e) => {
-  if (!compare) {
+
+// ------------------------------------------------------------- zoom & pan ---
+const vp = createViewport({
+  stage: $('stage'),
+  wrap: $('canvas-wrap'),
+  view,
+  mode: () => (compare ? 'split' : toolMode() ? 'tool' : 'view'),
+  tool,
+  onSplit: moveSplit,
+  onTap: (e) => {
+    if (!A) return;
     const i = faceAt(toImage(e));
     if (i >= 0) selectFace(i);
-    return;
-  }
-  view.setPointerCapture(e.pointerId);
-  moveSplit(e);
+  },
+  onDoubleTap: (e) => {
+    if (!A) return;
+    if (vp.scale > 1.05) return vp.reset();
+    const pt = toImage(e);
+    const i = faceAt(pt);
+    if (i >= 0) {
+      const [x0, y0, x1, y1] = A.faces[i].tight;
+      const m = (x1 - x0) * 0.25;
+      vp.zoomToRect([x0 - m, y0 - m, x1 + m, y1 + m], A.w);
+    } else {
+      const r = Math.min(A.w, A.h) / 5;
+      vp.zoomToRect([pt[0] - r, pt[1] - r, pt[0] + r, pt[1] + r], A.w);
+    }
+  },
+  onChange: (sc) => {
+    $('btn-zoom-face').hidden = sc > 1.01 || !A?.faces.length;
+    $('btn-zoom-reset').hidden = sc <= 1.01;
+    $('btn-zoom-reset').textContent = `${Math.round(sc * 100)} %  ·  Ganzes Bild`;
+  },
 });
-view.addEventListener('pointermove', (e) => {
-  if (compare && view.hasPointerCapture(e.pointerId)) moveSplit(e);
-});
+vp.onResize(() => { if (A) vp.fit(A.w, A.h); });
+$('btn-zoom-reset').onclick = () => vp.reset();
+$('btn-zoom-face').onclick = () => {
+  if (!A?.faces.length) return;
+  const [x0, y0, x1, y1] = A.faces[sel].tight;
+  const m = (x1 - x0) * 0.25;
+  vp.zoomToRect([x0 - m, y0 - m, x1 + m, y1 + m], A.w);
+};
+
+function setCollapsed(v) {
+  panelCollapsed = v;
+  $('panel').classList.toggle('collapsed', v);
+  $('btn-panel').setAttribute('aria-expanded', String(!v));
+  $('btn-panel').setAttribute('aria-label', v ? 'Menü ausklappen' : 'Menü einklappen');
+}
+$('btn-panel').onclick = () => setCollapsed(!panelCollapsed);
 
 const stage = $('stage');
 stage.addEventListener('dragover', (e) => { e.preventDefault(); stage.classList.add('drag'); });

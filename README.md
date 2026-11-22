@@ -13,9 +13,13 @@ Web-App zur Gesichtsbearbeitung. Läuft komplett im Browser (Smartphone und PC).
 | **Haare** | Haarfarbe ändern, Schattierung bleibt erhalten |
 | **Bart** | Bartstoppeln bis Vollbart, folgt der Wuchsrichtung |
 | **Form** | Gesicht schmaler, Nase schmaler, Lächeln, Kinnlänge |
+| **Bereich** | Mit dem Finger markieren, wo die Effekte eines Gesichts wirken sollen (z. B. nur Stirn oder eine Wange), mit Radierer und Rückgängig |
+| **Verformen** | Bildteile frei mit dem Finger verschieben (Kinn, Wangen, Haare), Pinselgröße einstellbar |
 | **Licht** | Helligkeit, Kontrast, Sättigung, Wärme |
 
 **Mehrere Gesichter:** Auf Gruppenfotos wählst du das Gesicht über die Vorschauleiste oder tippst es im Bild an. Jedes Gesicht hat eigene Einstellungen, auch die Haarfarbe: Die Haare werden der nächstgelegenen Person zugeordnet. Nur das Licht gilt für das ganze Foto.
+
+**Zoomen:** Mit zwei Fingern (oder Mausrad / Trackpad) zoomen und verschieben, Doppeltipp auf ein Gesicht zoomt heran, ein zweiter Doppeltipp zeigt wieder das ganze Bild. Ein Tipp auf den aktiven Reiter oder auf den Griff klappt das Menü ein, damit das Foto mehr Platz hat.
 
 Dazu kommen ein Vorher/Nachher-Vergleich mit verschiebbarer Trennlinie, Drag & Drop und eine Kamera-Aufnahme.
 
@@ -32,6 +36,7 @@ Die App in Safari öffnen, dann **Teilen → Zum Home-Bildschirm**. Danach start
 - **Gesichtserkennung:** [MediaPipe Face Landmarker](https://ai.google.dev/edge/mediapipe/solutions/vision/face_landmarker) findet 478 Punkte im Gesicht, inklusive Iris. Weil sein Detektor das Foto auf 128 × 128 px verkleinert, würde er kleine Gesichter auf Gruppenfotos übersehen. Deshalb wird das Foto zusätzlich in überlappenden Ausschnitten auf zwei feineren Stufen durchsucht. Jeder Treffer aus einem Ausschnitt wird vom MediaPipe Face Detector (`blaze_face_short_range`) noch einmal bewertet, um Fehltreffer wie Hände oder Bilder an der Wand auszusortieren (`src/vision.js`).
 - **Haare und Gesichtshaut:** Der MediaPipe-Segmentierer `selfie_multiclass_256x256` trennt Haare, Gesichtshaut und Hintergrund.
 - **Masken:** Aus den Punkten werden weiche Masken für Haut, Lippen, Iris, Lidschatten, Rouge und Bart berechnet (`src/analysis.js`).
+- **Lokale Bearbeitung:** Markierungen und Verformungen werden als Pinselstriche relativ zur Bildbreite gespeichert, gelten also auch beim Speichern in voller Auflösung (`src/local.js`). Zoom und Verschieben in `src/viewport.js`.
 - **Effekte:** Umfärben über die Luminanz, Multiplizieren oder Weichzeichnen (`src/render.js`). Gesichtsform über glatte lokale Verformungen (`src/warp.js`).
 
 Alle Modelle stehen unter Apache-2.0. Es gibt keinen Server und keine Cloud-API.

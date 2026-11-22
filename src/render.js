@@ -4,6 +4,7 @@
 import { clamp01, hexToRgb, lum, setLum, smoothstep } from './imageops.js';
 import { beardLayer } from './beard.js';
 import { applyWarps, buildWarps } from './warp.js';
+import { applyPushes, areaMask } from './local.js';
 
 export const FACE_DEFAULTS = {
   smooth: 0, glow: 0, teeth: 0,
@@ -24,8 +25,43 @@ export const GLOBAL_DEFAULTS = {
 
 export const isFaceKey = (k) => k in FACE_DEFAULTS;
 
+// `areas[i]` holds the painted strokes that limit face i's effects,
+// `pushes` the free warps from the "Verformen" tool (see local.js).
 export function newState(A) {
-  return { global: { ...GLOBAL_DEFAULTS }, faces: A.faces.map(() => ({ ...FACE_DEFAULTS })) };
+  return {
+    global: { ...GLOBAL_DEFAULTS },
+    faces: A.faces.map(() => ({ ...FACE_DEFAULTS })),
+    areas: A.faces.map(() => []),
+    pushes: [],
+  };
+}
+
+// Older saved edits predate local edits.
+export function upgradeState(st, A) {
+  st.areas ??= A.faces.map(() => []);
+  st.pushes ??= [];
+  return st;
+}
+
+// Face effects limited to a painted area: render them, then blend back to
+// the untouched pixels outside the area.
+function renderFaceInArea(o, F, w, s, area) {
+  const { box, bw, bh, m } = area;
+  const before = new Float32Array(bw * bh * 3);
+  for (let y = 0; y < bh; y++) {
+    const g = ((y + box[1]) * w + box[0]) * 3;
+    before.set(o.subarray(g, g + bw * 3), y * bw * 3);
+  }
+  renderFace(o, F, w, s);
+  for (let y = 0; y < bh; y++) {
+    const g = ((y + box[1]) * w + box[0]) * 3;
+    for (let x = 0; x < bw; x++) {
+      const k = m[y * bw + x];
+      if (k >= 0.999) continue;
+      const j = g + x * 3, b = (y * bw + x) * 3;
+      for (let c = 0; c < 3; c++) o[j + c] = before[b + c] + (o[j + c] - before[b + c]) * k;
+    }
+  }
 }
 
 const tmp = [0, 0, 0];
@@ -154,7 +190,11 @@ export function render(A, state) {
   const g = scale(state.global);
   const faces = state.faces.map(scale);
 
-  A.faces.forEach((F, i) => renderFace(o, F, w, faces[i]));
+  A.faces.forEach((F, i) => {
+    const area = areaMask(F, state.areas?.[i], w);
+    if (area && !area.empty) renderFaceInArea(o, F, w, faces[i], area);
+    else renderFace(o, F, w, faces[i]);
+  });
 
   // Without any detected face, hair colour applies to the whole photo.
   if (!A.faces.length && A.hair && g.hair) {
@@ -191,5 +231,5 @@ export function render(A, state) {
     const ops = buildWarps(F, faces[i]);
     if (ops.length) out = applyWarps(out, w, h, ops, F.box);
   });
-  return out;
+  return applyPushes(out, w, h, state.pushes);
 }

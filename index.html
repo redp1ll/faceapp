@@ -48,11 +48,16 @@
         <div class="canvas-wrap" id="canvas-wrap" hidden>
           <canvas id="view"></canvas>
         </div>
+        <div class="zoom-tools">
+          <button id="btn-zoom-face" class="pill" type="button" hidden>Gesicht heranzoomen</button>
+          <button id="btn-zoom-reset" class="pill" type="button" hidden>Ganzes Bild</button>
+        </div>
         <div class="busy" id="busy" hidden><div class="spinner"></div><span id="busy-text">Gesicht wird analysiert …</span></div>
         <div class="toast" id="toast" hidden></div>
       </section>
 
       <aside class="panel" id="panel" aria-label="Bearbeitung">
+        <button class="panel-handle" id="btn-panel" type="button" aria-expanded="true" aria-label="Menü einklappen"><span></span></button>
         <div class="faces" id="faces" hidden></div>
         <nav class="tabs" id="tabs" role="tablist"></nav>
         <div class="controls" id="controls"></div>
