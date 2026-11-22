@@ -17,7 +17,11 @@ Web-App zur Gesichtsbearbeitung. Läuft komplett im Browser (Smartphone und PC).
 
 **Mehrere Gesichter:** Auf Gruppenfotos wählst du das Gesicht über die Vorschauleiste oder tippst es im Bild an. Jedes Gesicht hat eigene Einstellungen, auch die Haarfarbe: Die Haare werden der nächstgelegenen Person zugeordnet. Nur das Licht gilt für das ganze Foto.
 
-Dazu kommen ein Vorher/Nachher-Vergleich mit verschiebbarer Trennlinie, Speichern als JPEG (auf dem Handy über das Teilen-Menü), Drag & Drop und eine Kamera-Aufnahme.
+Dazu kommen ein Vorher/Nachher-Vergleich mit verschiebbarer Trennlinie, Drag & Drop und eine Kamera-Aufnahme.
+
+**Speichern in voller Auflösung:** Bearbeitet wird zügig auf einer Vorschau mit höchstens 1600 px. Beim Speichern wird das Foto in Originalgröße neu berechnet, bis maximal 4096 px bzw. 12,6 Megapixel. Ein 12-MP-iPhone-Foto (4032 × 3024) bleibt dabei unverändert groß. Ausgabe als JPEG mit 92 % Qualität.
+
+**Galerie:** Jede Bearbeitung wird automatisch auf dem Gerät gespeichert (IndexedDB): das Originalfoto, alle Einstellungen und ein Vorschaubild. Gespeichert werden die letzten 40 Bearbeitungen. Über „Galerie“ oder „Zuletzt bearbeitet“ lässt sich jede Bearbeitung wieder öffnen und weiterbearbeiten.
 
 ## Auf dem iPhone
 

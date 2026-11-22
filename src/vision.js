@@ -33,7 +33,7 @@ export function loadModels() {
   return loading;
 }
 
-function resample(src, sw, sh, w, h) {
+export function resample(src, sw, sh, w, h) {
   if (sw === w && sh === h) return Float32Array.from(src);
   const out = new Float32Array(w * h);
   for (let y = 0; y < h; y++) {

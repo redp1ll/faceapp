@@ -21,6 +21,7 @@
         <span>Facette</span>
       </div>
       <div class="actions">
+        <button id="btn-gallery" class="ghost" type="button">Galerie</button>
         <button id="btn-open" class="ghost" type="button">Neues Foto</button>
         <button id="btn-save" class="primary" type="button" disabled>Speichern</button>
       </div>
@@ -38,6 +39,10 @@
               <button id="btn-camera" class="ghost" type="button">Kamera</button>
             </div>
             <p class="privacy">Alles wird direkt auf deinem Gerät berechnet. Dein Foto wird nirgendwohin hochgeladen.</p>
+            <div class="recent" id="recent" hidden>
+              <div class="recent-head"><span>Zuletzt bearbeitet</span><button id="btn-recent-all" type="button" class="link">Alle anzeigen</button></div>
+              <div class="recent-row"></div>
+            </div>
           </div>
         </div>
         <div class="canvas-wrap" id="canvas-wrap" hidden>
@@ -57,6 +62,26 @@
         </div>
       </aside>
     </main>
+
+    <section class="gallery" id="gallery" hidden aria-label="Galerie">
+      <header class="gallery-head">
+        <h2>Galerie</h2>
+        <button id="btn-gallery-close" class="ghost" type="button">Schließen</button>
+      </header>
+      <p class="hint gallery-note">Deine letzten Bearbeitungen. Sie bleiben nur auf diesem Gerät. Tippe ein Bild an, um weiterzubearbeiten.</p>
+      <p class="hint" id="gallery-empty" hidden>Noch keine Bearbeitungen. Sobald du ein Foto veränderst, erscheint es hier.</p>
+      <div class="gallery-grid" id="gallery-grid"></div>
+    </section>
+
+    <div class="sheet-backdrop" id="export-sheet" hidden>
+      <div class="sheet" role="dialog" aria-label="Bild speichern">
+        <img alt="Bearbeitetes Foto" />
+        <p class="sheet-title">Fertig!</p>
+        <p class="hint" id="export-info"></p>
+        <button id="btn-share" class="primary" type="button">In Fotos sichern oder teilen</button>
+        <button id="btn-sheet-close" class="ghost" type="button">Schließen</button>
+      </div>
+    </div>
 
     <input id="file" type="file" accept="image/*" hidden />
     <input id="camera" type="file" accept="image/*" capture="user" hidden />

@@ -1,9 +1,15 @@
 import { analyze } from './analysis.js';
 import { FACE_DEFAULTS, GLOBAL_DEFAULTS, isFaceKey, newState, render } from './render.js';
-import { detect, loadModels } from './vision.js';
+import { detect, loadModels, resample } from './vision.js';
+import { deleteEdit, getOriginal, listEdits, saveEdit, saveOriginal } from './gallery.js';
 import { LOOKS, applyLook } from './presets.js';
 
+// Editing happens on a preview of at most 1600 px so sliders react
+// instantly; saving re-renders at full resolution (up to ~12.6 MP, which
+// covers 12 MP iPhone photos at their native size).
 const MAX_SIDE = 1600;
+const EXPORT_MAX_SIDE = 4096;
+const EXPORT_MAX_PIXELS = 12.6e6;
 
 const PALETTES = {
   lipColor: ['#b3263e', '#d9475c', '#8e1b2c', '#c9636b', '#a2455a', '#6d1f3a', '#e0806f'],
@@ -57,6 +63,10 @@ const original = document.createElement('canvas');
 const result = document.createElement('canvas');
 
 let state = null;
+let source = null; // decoded photo at its own resolution
+let detection = null; // untouched detection result at preview size
+let currentEdit = null; // gallery entry of the open photo
+let editVersion = 0; // bumps on every change
 let A = null; // analysis of the current photo
 let sel = 0; // index of the face being edited
 let highlightUntil = 0;
@@ -328,7 +338,8 @@ function scheduleRender() {
     result.getContext('2d').putImageData(new ImageData(px, A.w, A.h), 0, 0);
     draw();
     refreshThumb();
-    prepareExport();
+    editVersion++;
+    queueAutosave();
   });
 }
 
@@ -395,7 +406,7 @@ async function decode(file) {
   }
 }
 
-async function openFile(file) {
+async function openFile(file, restore = null) {
   if (!file) return;
   if (!file.type.startsWith('image/')) return toast('Bitte wähle eine Bilddatei aus.');
   busy('Foto wird geladen …');
@@ -413,6 +424,9 @@ async function openFile(file) {
     busy('Gesicht wird analysiert …');
     await new Promise((r) => setTimeout(r, 30)); // let the overlay paint
     const det = await detect(original);
+    // Keep a pristine copy for the full-resolution export (analysis blurs masks in place).
+    detection = { faces: det.faces, hair: det.hair?.slice() ?? null, faceSkin: det.faceSkin?.slice() ?? null };
+    source = img;
 
     const px = octx.getImageData(0, 0, w, h).data;
     const rgb = new Float32Array(w * h * 3);
@@ -430,11 +444,23 @@ async function openFile(file) {
       const best = A.faces[sel].tight;
       if (area > (best[2] - best[0]) * (best[3] - best[1])) sel = i;
     });
+    if (restore && restore.state.faces.length === A.faces.length) {
+      state = structuredClone(restore.state);
+      sel = Math.min(restore.sel ?? sel, Math.max(0, A.faces.length - 1));
+      currentEdit = { id: restore.id, created: restore.created, stored: true, file };
+    } else {
+      if (restore) toast('Die gespeicherten Einstellungen passten nicht mehr zum Foto und wurden zurückgesetzt.');
+      currentEdit = { id: newId(), created: Date.now(), stored: false, file };
+    }
+    exportCache = null;
+    lookThumbs = null;
 
     $('empty').hidden = true;
+    document.querySelector('.layout').classList.add('has-photo');
     $('canvas-wrap').hidden = false;
     for (const id of ['btn-save', 'btn-compare', 'btn-reset']) $(id).disabled = false;
-    if (!A.faces.length) toast('Kein Gesicht erkannt. Haare und Licht lassen sich trotzdem bearbeiten.');
+    closeGallery();
+    if (restore) { /* no hints when reopening */ } else if (!A.faces.length) toast('Kein Gesicht erkannt. Haare und Licht lassen sich trotzdem bearbeiten.');
     else if (A.faces.length > 1) {
       toast(`${A.faces.length} Gesichter erkannt. Tippe auf ein Gesicht, um es auszuwählen.`);
       highlightUntil = performance.now() + 1800;
@@ -452,24 +478,77 @@ async function openFile(file) {
   }
 }
 
-// The JPEG is prepared shortly after every change. iOS Safari only opens
-// the share sheet if navigator.share() is called right inside the tap,
-// without awaiting anything first, so the file must already exist.
-let exportFile = null;
-let exportTimer = 0;
-let exportVersion = 0;
+// ------------------------------------------------------------------- save ---
+let exportCache = null; // { version, file, w, h }
 
-function prepareExport() {
-  exportFile = null;
-  const v = ++exportVersion;
-  clearTimeout(exportTimer);
-  exportTimer = setTimeout(() => {
-    result.toBlob((blob) => {
-      if (v !== exportVersion || !blob) return;
-      const name = `facette-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.jpg`;
-      exportFile = new File([blob], name, { type: 'image/jpeg' });
-    }, 'image/jpeg', 0.92);
-  }, 250);
+function newId() {
+  return crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+const nextFrame = () => new Promise((r) => setTimeout(r, 30));
+
+function canvasToFile(canvas) {
+  return new Promise((resolve, reject) => canvas.toBlob((blob) => {
+    if (!blob) return reject(new Error('Export fehlgeschlagen'));
+    const name = `facette-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.jpg`;
+    resolve(new File([blob], name, { type: 'image/jpeg' }));
+  }, 'image/jpeg', 0.92));
+}
+
+// Re-run analysis and rendering on the photo at (up to) full resolution.
+// Landmarks and masks come from the preview detection, scaled up.
+async function renderFullSize() {
+  const iw = source.width, ih = source.height;
+  const k = Math.min(1, EXPORT_MAX_SIDE / Math.max(iw, ih), Math.sqrt(EXPORT_MAX_PIXELS / (iw * ih)));
+  const W = Math.round(iw * k), H = Math.round(ih * k);
+  if (W <= A.w && H <= A.h) return result;
+
+  const c = document.createElement('canvas');
+  c.width = W;
+  c.height = H;
+  const ctx = c.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(source, 0, 0, W, H);
+  let rgb = new Float32Array(W * H * 3);
+  {
+    const px = ctx.getImageData(0, 0, W, H).data;
+    for (let i = 0; i < W * H; i++) {
+      rgb[i * 3] = px[i * 4] / 255;
+      rgb[i * 3 + 1] = px[i * 4 + 1] / 255;
+      rgb[i * 3 + 2] = px[i * 4 + 2] / 255;
+    }
+  }
+  await nextFrame();
+  const sx = W / A.w, sy = H / A.h;
+  const det = {
+    faces: detection.faces.map((f) => f.map(([x, y]) => [x * sx, y * sy])),
+    hair: detection.hair ? resample(detection.hair, A.w, A.h, W, H) : null,
+    faceSkin: detection.faceSkin ? resample(detection.faceSkin, A.w, A.h, W, H) : null,
+  };
+  let full = analyze(rgb, W, H, det);
+  await nextFrame();
+  const out = render(full, state);
+  full = rgb = null;
+  ctx.putImageData(new ImageData(out, W, H), 0, 0);
+  return c;
+}
+
+async function buildExport() {
+  if (exportCache && exportCache.version === editVersion) return exportCache;
+  const version = editVersion;
+  busy('Bild wird in voller Auflösung erstellt …');
+  await nextFrame();
+  let canvas;
+  try {
+    canvas = await renderFullSize();
+  } catch (err) {
+    // Out of memory on very large photos: fall back to the preview size.
+    console.error(err);
+    canvas = result;
+    toast('Für volle Auflösung reicht der Speicher nicht – gespeichert wird in Vorschaugröße.');
+  }
+  const file = await canvasToFile(canvas);
+  exportCache = { version, file, w: canvas.width, h: canvas.height };
+  return exportCache;
 }
 
 function download(file) {
@@ -480,33 +559,162 @@ function download(file) {
   setTimeout(() => URL.revokeObjectURL(a.href), 4000);
 }
 
-function save() {
+const isMobile = () => matchMedia('(pointer: coarse)').matches;
+
+async function save() {
   if (!A) return;
-  if (!exportFile) {
-    toast('Einen Moment, das Bild wird vorbereitet …', 1500);
+  let exp;
+  try {
+    exp = await buildExport();
+  } catch (err) {
+    console.error(err);
+    toast('Das Bild konnte nicht gespeichert werden.');
+    return;
+  } finally {
+    busy(null);
+  }
+  saveNow(); // make sure the gallery has the latest state
+  if (!(isMobile() && navigator.canShare?.({ files: [exp.file] }))) {
+    download(exp.file);
+    toast(`Gespeichert: ${exp.w} × ${exp.h} Pixel`);
     return;
   }
-  const file = exportFile;
-  const mobile = matchMedia('(pointer: coarse)').matches;
-  if (mobile && navigator.canShare?.({ files: [file] })) {
-    navigator.share({ files: [file] }).catch((e) => {
-      if (e.name !== 'AbortError') download(file);
-    });
-    return;
+  // iOS only opens the share sheet from a fresh tap, so ask for one.
+  const sheet = $('export-sheet');
+  const img = sheet.querySelector('img');
+  URL.revokeObjectURL(img.src);
+  img.src = URL.createObjectURL(exp.file);
+  $('export-info').textContent = `${exp.w} × ${exp.h} Pixel`;
+  sheet.hidden = false;
+  $('btn-share').onclick = () => {
+    navigator.share({ files: [exp.file] })
+      .then(() => { sheet.hidden = true; })
+      .catch((e) => { if (e.name !== 'AbortError') download(exp.file); });
+  };
+}
+
+// ---------------------------------------------------------------- gallery ---
+let autosaveTimer = 0;
+
+function anyEdits() {
+  if (!state) return false;
+  if (Object.keys(GLOBAL_DEFAULTS).some((k) => state.global[k] !== GLOBAL_DEFAULTS[k])) return true;
+  return state.faces.some((_, i) => hasEdits(i));
+}
+
+function queueAutosave() {
+  clearTimeout(autosaveTimer);
+  autosaveTimer = setTimeout(saveNow, 900);
+}
+
+async function saveNow() {
+  clearTimeout(autosaveTimer);
+  const entry = currentEdit;
+  if (!entry || !A || !anyEdits()) return;
+  try {
+    if (!entry.stored) {
+      await saveOriginal(entry.id, entry.file);
+      entry.stored = true;
+    }
+    const t = document.createElement('canvas');
+    const k = 360 / Math.max(A.w, A.h);
+    t.width = Math.round(A.w * k);
+    t.height = Math.round(A.h * k);
+    t.getContext('2d').drawImage(result, 0, 0, t.width, t.height);
+    const thumb = await new Promise((r) => t.toBlob(r, 'image/jpeg', 0.8));
+    await saveEdit({ id: entry.id, created: entry.created, updated: Date.now(), state: structuredClone(state), sel, thumb });
+  } catch (err) {
+    console.warn('Galerie: Speichern fehlgeschlagen', err);
   }
-  download(file);
+}
+
+function when(ts) {
+  const min = Math.round((Date.now() - ts) / 60000);
+  if (min < 1) return 'gerade eben';
+  if (min < 60) return `vor ${min} Min.`;
+  const d = new Date(ts), today = new Date();
+  const time = d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+  if (d.toDateString() === today.toDateString()) return `heute, ${time}`;
+  return d.toLocaleDateString('de-DE', { day: 'numeric', month: 'short' }) + `, ${time}`;
+}
+
+const thumbUrls = [];
+function tile(entry, onDeleted) {
+  const el = document.createElement('div');
+  el.className = 'g-tile';
+  const url = URL.createObjectURL(entry.thumb);
+  thumbUrls.push(url);
+  el.innerHTML = `<button type="button" class="g-open" aria-label="Bearbeitung öffnen"><img alt="" src="${url}" /></button>
+    <span class="g-date">${when(entry.updated)}</span>
+    <button type="button" class="g-del" aria-label="Löschen">×</button>`;
+  el.querySelector('.g-open').onclick = () => reopen(entry);
+  el.querySelector('.g-del').onclick = async () => {
+    if (!confirm('Diese Bearbeitung aus der Galerie löschen?')) return;
+    await deleteEdit(entry.id);
+    if (currentEdit?.id === entry.id) currentEdit = { ...currentEdit, id: newId(), created: Date.now(), stored: false };
+    onDeleted();
+  };
+  return el;
+}
+
+async function reopen(entry) {
+  await saveNow();
+  const blob = await getOriginal(entry.id);
+  if (!blob) return toast('Das Originalfoto ist nicht mehr vorhanden.');
+  await openFile(blob, entry);
+}
+
+async function openGallery() {
+  await saveNow();
+  thumbUrls.splice(0).forEach((u) => URL.revokeObjectURL(u));
+  const grid = $('gallery-grid');
+  grid.innerHTML = '';
+  const edits = await listEdits();
+  $('gallery-empty').hidden = edits.length > 0;
+  for (const e of edits) grid.append(tile(e, openGallery));
+  $('gallery').hidden = false;
+}
+
+function closeGallery() {
+  $('gallery').hidden = true;
+  renderRecent();
+}
+
+// "Recently edited" row on the start screen.
+async function renderRecent() {
+  const box = $('recent');
+  const edits = await listEdits();
+  box.hidden = !edits.length;
+  const row = box.querySelector('.recent-row');
+  row.innerHTML = '';
+  for (const e of edits.slice(0, 4)) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'recent-item';
+    const url = URL.createObjectURL(e.thumb);
+    thumbUrls.push(url);
+    b.innerHTML = `<img alt="Bearbeitung vom ${when(e.updated)}" src="${url}" />`;
+    b.onclick = () => reopen(e);
+    row.append(b);
+  }
 }
 
 // ----------------------------------------------------------------- wiring ---
 $('btn-open').onclick = $('btn-pick').onclick = () => $('file').click();
 $('btn-camera').onclick = () => $('camera').click();
 for (const id of ['file', 'camera']) {
-  $(id).addEventListener('change', (e) => {
+  $(id).addEventListener('change', async (e) => {
+    await saveNow();
     openFile(e.target.files[0]);
     e.target.value = '';
   });
 }
 $('btn-save').onclick = save;
+$('btn-gallery').onclick = openGallery;
+$('btn-gallery-close').onclick = closeGallery;
+$('btn-recent-all').onclick = openGallery;
+$('btn-sheet-close').onclick = () => ($('export-sheet').hidden = true);
+document.addEventListener('visibilitychange', () => { if (document.hidden) saveNow(); });
 $('btn-reset').onclick = () => {
   state = newState(A);
   buildFaces();
@@ -549,5 +757,6 @@ stage.addEventListener('drop', (e) => {
 
 buildTabs();
 buildControls();
+renderRecent();
 // Warm the models up in the background so the first photo opens faster.
 loadModels().catch(() => {});

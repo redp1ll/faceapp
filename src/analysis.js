@@ -31,7 +31,10 @@ export function analyze(rgb, w, h, det) {
     A.hairMeanL = meanLum(rgb, A.hair, 0.6);
   }
   A.faces = det.faces.map((lm) => analyzeFace(rgb, w, h, lm, det.faceSkin));
-  if (A.hair && A.faces.length) splitHair(A);
+  if (A.hair && A.faces.length) {
+    splitHair(A);
+    A.hair = null; // only needed when no face was found; frees memory
+  }
   return A;
 }
 
