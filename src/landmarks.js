@@ -26,10 +26,6 @@ export const BROW_L = [300, 293, 334, 296, 336, 285, 295, 282, 283, 276];
 export const IRIS_R = [468, 469, 470, 471, 472];
 export const IRIS_L = [473, 474, 475, 476, 477];
 
-// Lower face outline from the left cheek over the chin to the right cheek.
-export const LOWER_OVAL = [454, 323, 361, 288, 397, 365, 379, 378, 400, 377, 152, 148, 176, 149, 150, 136, 172, 58,
-  132, 93, 234];
-
 export const JAW_R = [93, 132, 58, 172, 136, 150];
 export const JAW_L = [323, 361, 288, 397, 365, 379];
 

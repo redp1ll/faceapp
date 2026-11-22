@@ -6,13 +6,12 @@ Web-App zur Gesichtsbearbeitung. Läuft komplett im Browser (Smartphone und PC).
 
 | Bereich | Was es macht |
 |---|---|
-| **Looks** | Fertige Kombinationen aus Retusche und Farbfilter: Natürlich, Frisch, Weich, Glamour, Film, Kino, Gepflegt, Vollbart, Lächeln, Schwarzweiß, jeweils mit Stärke-Regler |
+| **Looks** | Fertige Kombinationen aus Retusche und Farbfilter: Natürlich, Frisch, Weich, Glamour, Film, Kino, Gepflegt, Lächeln, Schwarzweiß, jeweils mit Stärke-Regler |
 | **Filter** | Farb-Looks fürs ganze Foto: Klar, Golden, Film, Kino, Pastell, Kühl, Matt, Vintage, Noir, S/W weich, mit Stärke-Regler |
 | **Haut** | Glätten (Poren bleiben erhalten), Augenringe aufhellen, Strahlen, Zähne aufhellen |
 | **Make-up** | Lippenstift, Rouge, Lidschatten, jeweils mit Farbwahl |
 | **Augen** | Leuchten (Augenweiß aufhellen, Iris schärfen), Augenfarbe (Pupille bleibt dunkel), Augen vergrößern |
 | **Haare** | Haarfarbe ändern, Schattierung bleibt erhalten |
-| **Bart** | Bartstoppeln bis Vollbart, folgt der Wuchsrichtung |
 | **Form** | Gesicht schmaler, Nase schmaler, Lächeln, Kinnlänge |
 | **Bereich** | Mit dem Finger markieren, wo die Effekte eines Gesichts wirken sollen (z. B. nur Stirn oder eine Wange), mit Radierer und Rückgängig |
 | **Verformen** | Bildteile frei mit dem Finger verschieben (Kinn, Wangen, Haare), Pinselgröße einstellbar |
@@ -36,7 +35,7 @@ Die App in Safari öffnen, dann **Teilen → Zum Home-Bildschirm**. Danach start
 
 - **Gesichtserkennung:** [MediaPipe Face Landmarker](https://ai.google.dev/edge/mediapipe/solutions/vision/face_landmarker) findet 478 Punkte im Gesicht, inklusive Iris. Weil sein Detektor das Foto auf 128 × 128 px verkleinert, würde er kleine Gesichter auf Gruppenfotos übersehen. Deshalb wird das Foto zusätzlich in überlappenden Ausschnitten auf zwei feineren Stufen durchsucht. Jeder Treffer aus einem Ausschnitt wird vom MediaPipe Face Detector (`blaze_face_short_range`) noch einmal bewertet, um Fehltreffer wie Hände oder Bilder an der Wand auszusortieren (`src/vision.js`).
 - **Haare und Gesichtshaut:** Der MediaPipe-Segmentierer `selfie_multiclass_256x256` trennt Haare, Gesichtshaut und Hintergrund.
-- **Masken:** Aus den Punkten werden weiche Masken für Haut, Lippen, Iris, Lidschatten, Rouge und Bart berechnet (`src/analysis.js`).
+- **Masken:** Aus den Punkten werden weiche Masken für Haut, Lippen, Iris, Lidschatten, Rouge, Augenringe und Augen berechnet (`src/analysis.js`).
 - **Lokale Bearbeitung:** Markierungen und Verformungen werden als Pinselstriche relativ zur Bildbreite gespeichert, gelten also auch beim Speichern in voller Auflösung (`src/local.js`). Zoom und Verschieben in `src/viewport.js`.
 - **Hautglättung:** Frequenztrennung wie in Retusche-Apps. Unebenheiten mittlerer Größe (Flecken, Rötungen) werden geglättet, feine Struktur wie Poren bleibt (`src/render.js`).
 - **Filter:** Tonkurven pro Farbkanal, Split-Toning für Schatten und Lichter, Vibrance, Vignette. Hauttöne werden dabei geschont (`src/filters.js`).

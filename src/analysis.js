@@ -3,7 +3,6 @@
 // luminances and the geometry used by the face-shape warps.
 import * as L from './landmarks.js';
 import { blur, circleMask, dilate, meanLum, polygonMask } from './imageops.js';
-import { buildBeard } from './beard.js';
 
 const sub = (a, b) => [a[0] - b[0], a[1] - b[1]];
 const add = (a, b) => [a[0] + b[0], a[1] + b[1]];
@@ -178,22 +177,6 @@ function analyzeFace(rgb, w, h, pts, faceSkin) {
   const blush = circleMask([[...cheekR, fw * 0.09], [...cheekL, fw * 0.09]], bw, bh, fw * 0.06);
   for (let i = 0; i < n; i++) blush[i] *= skin[i];
   F.blush = blush;
-
-  // --- beard region ---------------------------------------------------------
-  const drop = mul(down, fw * 0.16);
-  const beardPoly = [
-    ...poly(L.LOWER_OVAL),
-    add(lerp(lpt(L.P.faceR), lpt(L.P.noseWingR), 0.4), drop),
-    lpt(L.P.noseWingR),
-    lpt(L.P.noseBottom),
-    lpt(L.P.noseWingL),
-    add(lerp(lpt(L.P.faceL), lpt(L.P.noseWingL), 0.4), drop),
-  ];
-  const beard = polygonMask([beardPoly], bw, bh, fw * 0.035);
-  const lipsGap = dilate(Float32Array.from(lipsOuter), bw, bh, fw * 0.012);
-  for (let i = 0; i < n; i++) beard[i] *= 1 - lipsGap[i];
-  F.beard = beard;
-  F.beardLayer = buildBeard({ beard, fw, down, pts: lp }, bw, bh);
 
   // --- eyes: whites and irises for "Leuchten" ------------------------------
   F.eyes = eyesHard;

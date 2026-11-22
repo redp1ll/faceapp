@@ -2,7 +2,6 @@
 // Face effects run per face inside that face's local box; hair colour and
 // light are global.
 import { clamp01, hexToRgb, lum, setLum, smoothstep } from './imageops.js';
-import { beardLayer } from './beard.js';
 import { applyWarps, buildWarps } from './warp.js';
 import { applyPushes, areaMask } from './local.js';
 import { applyFilter, skinness } from './filters.js';
@@ -16,7 +15,6 @@ export const FACE_DEFAULTS = {
   iris: 0, irisColor: '#3d8fd1',
   eyeSize: 0,
   hair: 0, hairColor: '#d9b26f',
-  beard: 0, beardColor: '#3a2a20',
   slim: 0, nose: 0, smile: 0, chin: 0,
 };
 
@@ -42,7 +40,8 @@ export function newState(A) {
 // Older saved edits predate local edits.
 export function upgradeState(st, A) {
   st.global = { ...GLOBAL_DEFAULTS, ...st.global };
-  st.faces = st.faces.map((f) => ({ ...FACE_DEFAULTS, ...f }));
+  // The beard tool was removed; drop its leftover settings.
+  st.faces = st.faces.map(({ beard, beardColor, ...f }) => ({ ...FACE_DEFAULTS, ...f }));
   st.areas ??= A.faces.map(() => []);
   st.pushes ??= [];
   return st;
@@ -222,20 +221,6 @@ function renderFace(o, F, w, s) {
   recolorFace(o, F, w, F.iris, s.irisColor, s.iris * 0.85, F.irisMeanL, 0.6);
 
   if (F.hair && s.hair) recolorFace(o, F.hair, w, F.hair.mask, s.hairColor, s.hair * 0.9, F.hair.meanL, 0.85);
-
-  if (F.beardLayer && s.beard) {
-    // Darker skin under the stubble, then the hairs themselves.
-    tintFace(o, F, w, F.beard, s.beardColor, s.beard * s.beard * 0.18);
-    const layer = beardLayer(F.beardLayer, F.bw, F.bh, s.beard, s.beardColor);
-    eachInBox(F, w, (li, gi) => {
-      const a = layer[li * 4 + 3];
-      if (!a) return;
-      const j = gi * 3;
-      o[j] = o[j] * (1 - a) + layer[li * 4];
-      o[j + 1] = o[j + 1] * (1 - a) + layer[li * 4 + 1];
-      o[j + 2] = o[j + 2] * (1 - a) + layer[li * 4 + 2];
-    });
-  }
 }
 
 export function render(A, state) {

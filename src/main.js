@@ -20,7 +20,6 @@ const PALETTES = {
   shadowColor: ['#7a5a8c', '#8a6a4f', '#4f5d75', '#a07060', '#3c3c3c', '#5a7d6b'],
   irisColor: ['#3d8fd1', '#4fa36b', '#7a8f9e', '#8b5a2b', '#3fb4b0', '#6e5bb8'],
   hairColor: ['#d9b26f', '#f0dca6', '#8a5a34', '#2a1d16', '#b4442f', '#c8c8cc', '#e0758f', '#4466c4'],
-  beardColor: ['#3a2a20', '#1d1917', '#6b4a32', '#9a6b3f', '#8a8580'],
 };
 
 const TABS = [
@@ -44,9 +43,6 @@ const TABS = [
   ] },
   { id: 'hair', label: 'Haare', controls: [
     { key: 'hair', label: 'Haarfarbe', color: 'hairColor' },
-  ] },
-  { id: 'beard', label: 'Bart', face: true, controls: [
-    { key: 'beard', label: 'Bartstoppeln', color: 'beardColor' },
   ] },
   { id: 'shape', label: 'Form', face: true, controls: [
     { key: 'slim', label: 'Gesicht schmaler' },
