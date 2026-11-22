@@ -14,6 +14,8 @@ Web-App zur Gesichtsbearbeitung. Läuft komplett im Browser (Smartphone und PC).
 | **Form** | Gesicht schmaler, Nase schmaler, Lächeln, Kinnlänge |
 | **Licht** | Helligkeit, Kontrast, Sättigung, Wärme |
 
+**Mehrere Gesichter:** Auf Gruppenfotos wählst du das Gesicht über die Vorschauleiste oder tippst es im Bild an. Jedes Gesicht hat eigene Einstellungen. Haarfarbe und Licht gelten für das ganze Foto.
+
 Dazu kommen ein Vorher/Nachher-Vergleich mit verschiebbarer Trennlinie, Speichern als JPEG (auf dem Handy über das Teilen-Menü), Drag & Drop und eine Kamera-Aufnahme.
 
 ## Wie es funktioniert

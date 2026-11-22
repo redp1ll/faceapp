@@ -1,5 +1,5 @@
 import { analyze } from './analysis.js';
-import { DEFAULTS, render } from './render.js';
+import { FACE_DEFAULTS, GLOBAL_DEFAULTS, isFaceKey, newState, render } from './render.js';
 import { detect, loadModels } from './vision.js';
 
 const MAX_SIDE = 1600;
@@ -54,8 +54,14 @@ const vctx = view.getContext('2d');
 const original = document.createElement('canvas');
 const result = document.createElement('canvas');
 
-let state = { ...DEFAULTS };
+let state = null;
 let A = null; // analysis of the current photo
+let sel = 0; // index of the face being edited
+let highlightUntil = 0;
+
+// Settings of the selected face, or the photo-wide ones (hair, light).
+const bag = (key) => (isFaceKey(key) ? state.faces[sel] : state.global);
+const defaultOf = (key) => (isFaceKey(key) ? FACE_DEFAULTS : GLOBAL_DEFAULTS)[key];
 let activeTab = 'skin';
 let compare = false;
 let split = 0.5;
@@ -98,7 +104,7 @@ function buildControls() {
     box.innerHTML = '<p class="hint">Wähle zuerst ein Foto aus.</p>';
     return;
   }
-  if (tab.face && !A.face) {
+  if (tab.face && !A.faces.length) {
     box.innerHTML = '<p class="hint">Auf diesem Foto wurde kein Gesicht erkannt. Haare und Licht lassen sich trotzdem bearbeiten.</p>';
     return;
   }
@@ -112,17 +118,17 @@ function buildControls() {
     const id = `ctl-${c.key}`;
     const min = c.min ?? 0;
     wrap.innerHTML = `
-      <div class="control-head"><label for="${id}">${c.label}</label><output>${state[c.key]}</output></div>
-      <input id="${id}" type="range" min="${min}" max="100" step="1" value="${state[c.key]}" />`;
+      <div class="control-head"><label for="${id}">${c.label}</label><output>${bag(c.key)[c.key]}</output></div>
+      <input id="${id}" type="range" min="${min}" max="100" step="1" value="${bag(c.key)[c.key]}" />`;
     const input = wrap.querySelector('input');
     const out = wrap.querySelector('output');
     input.addEventListener('input', () => {
-      state[c.key] = Number(input.value);
+      bag(c.key)[c.key] = Number(input.value);
       out.textContent = input.value;
       scheduleRender();
     });
     input.addEventListener('dblclick', () => {
-      input.value = DEFAULTS[c.key];
+      input.value = defaultOf(c.key);
       input.dispatchEvent(new Event('input'));
     });
 
@@ -130,10 +136,10 @@ function buildControls() {
       const sw = document.createElement('div');
       sw.className = 'swatches';
       const pick = (hex) => {
-        state[c.color] = hex;
+        bag(c.key)[c.color] = hex;
         // Picking a colour on an untouched slider should show something.
-        if (!state[c.key]) {
-          state[c.key] = 60;
+        if (!bag(c.key)[c.key]) {
+          bag(c.key)[c.key] = 60;
           input.value = 60;
           out.textContent = '60';
         }
@@ -147,20 +153,79 @@ function buildControls() {
         b.style.background = hex;
         b.dataset.hex = hex;
         b.setAttribute('aria-label', `Farbe ${hex}`);
-        b.setAttribute('aria-pressed', String(state[c.color] === hex));
+        b.setAttribute('aria-pressed', String(bag(c.key)[c.color] === hex));
         b.onclick = () => pick(hex);
         sw.append(b);
       }
       const custom = document.createElement('label');
       custom.className = 'swatch swatch-custom';
       custom.title = 'Eigene Farbe';
-      custom.innerHTML = `<input type="color" value="${state[c.color]}" aria-label="Eigene Farbe" />`;
+      custom.innerHTML = `<input type="color" value="${bag(c.key)[c.color]}" aria-label="Eigene Farbe" />`;
       custom.querySelector('input').addEventListener('input', (e) => pick(e.target.value));
       sw.append(custom);
       wrap.append(sw);
     }
     box.append(wrap);
   }
+}
+
+// ------------------------------------------------------------ face picker ---
+function hasEdits(i) {
+  return Object.keys(FACE_DEFAULTS).some((k) => typeof FACE_DEFAULTS[k] === 'number' && state.faces[i][k] !== FACE_DEFAULTS[k]);
+}
+
+function buildFaces() {
+  const strip = $('faces');
+  strip.innerHTML = '';
+  strip.hidden = !A || A.faces.length < 2;
+  if (strip.hidden) return;
+  const label = document.createElement('span');
+  label.className = 'faces-label';
+  label.textContent = 'Gesicht';
+  strip.append(label);
+  A.faces.forEach((F, i) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'face-thumb';
+    b.setAttribute('aria-pressed', String(i === sel));
+    b.setAttribute('aria-label', `Gesicht ${i + 1} bearbeiten`);
+    if (hasEdits(i)) b.classList.add('edited');
+    const c = document.createElement('canvas');
+    const [x0, y0, x1, y1] = F.tight;
+    const side = Math.max(x1 - x0, y1 - y0) * 1.15;
+    const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+    c.width = c.height = 96;
+    c.getContext('2d').drawImage(result, cx - side / 2, cy - side / 2, side, side, 0, 0, 96, 96);
+    b.append(c);
+    b.onclick = () => selectFace(i);
+    strip.append(b);
+  });
+}
+
+function selectFace(i) {
+  if (!A || i === sel) return;
+  sel = i;
+  highlightUntil = performance.now() + 1400;
+  buildFaces();
+  buildControls();
+  draw();
+  setTimeout(draw, 1450);
+}
+
+// Image coordinates of a pointer event on the view canvas.
+function toImage(e) {
+  const r = view.getBoundingClientRect();
+  return [((e.clientX - r.left) / r.width) * A.w, ((e.clientY - r.top) / r.height) * A.h];
+}
+
+function faceAt([x, y]) {
+  let best = -1, bestArea = Infinity;
+  A.faces.forEach((F, i) => {
+    const [x0, y0, x1, y1] = F.tight;
+    const area = (x1 - x0) * (y1 - y0);
+    if (x >= x0 && x <= x1 && y >= y0 && y <= y1 && area < bestArea) { best = i; bestArea = area; }
+  });
+  return best;
 }
 
 // ----------------------------------------------------------------- render ---
@@ -172,12 +237,38 @@ function scheduleRender() {
     const px = render(A, state);
     result.getContext('2d').putImageData(new ImageData(px, A.w, A.h), 0, 0);
     draw();
+    refreshThumb();
   });
+}
+
+// Keep the selected face's thumbnail (and its "edited" dot) up to date.
+function refreshThumb() {
+  const b = $('faces').querySelectorAll('.face-thumb')[sel];
+  if (!b) return;
+  const F = A.faces[sel];
+  const [x0, y0, x1, y1] = F.tight;
+  const side = Math.max(x1 - x0, y1 - y0) * 1.15;
+  const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+  const ctx = b.querySelector('canvas').getContext('2d');
+  ctx.drawImage(result, cx - side / 2, cy - side / 2, side, side, 0, 0, 96, 96);
+  b.classList.toggle('edited', hasEdits(sel));
 }
 
 function draw() {
   if (!A) return;
   vctx.drawImage(result, 0, 0);
+  if (!compare && A.faces.length > 1 && performance.now() < highlightUntil) {
+    const poly = A.faces[sel].ovalPoly;
+    vctx.save();
+    vctx.lineWidth = Math.max(2, A.w / 300);
+    vctx.setLineDash([vctx.lineWidth * 3, vctx.lineWidth * 2]);
+    vctx.strokeStyle = '#ff7a59';
+    vctx.beginPath();
+    poly.forEach(([x, y], i) => (i ? vctx.lineTo(x, y) : vctx.moveTo(x, y)));
+    vctx.closePath();
+    vctx.stroke();
+    vctx.restore();
+  }
   if (compare) {
     const x = Math.round(split * A.w);
     vctx.drawImage(original, 0, 0, x, A.h, 0, 0, x, A.h);
@@ -240,14 +331,27 @@ async function openFile(file) {
       rgb[i * 3 + 2] = px[i * 4 + 2] / 255;
     }
     A = analyze(rgb, w, h, det);
-    state = { ...DEFAULTS };
+    state = newState(A);
+    // Start with the largest face selected.
+    sel = 0;
+    A.faces.forEach((F, i) => {
+      const area = (F.tight[2] - F.tight[0]) * (F.tight[3] - F.tight[1]);
+      const best = A.faces[sel].tight;
+      if (area > (best[2] - best[0]) * (best[3] - best[1])) sel = i;
+    });
 
     $('empty').hidden = true;
     $('canvas-wrap').hidden = false;
     for (const id of ['btn-save', 'btn-compare', 'btn-reset']) $(id).disabled = false;
-    if (!A.face) toast('Kein Gesicht erkannt. Haare und Licht lassen sich trotzdem bearbeiten.');
-    else if (det.faceCount > 1) toast('Mehrere Gesichter erkannt – bearbeitet wird das größte.');
+    if (!A.faces.length) toast('Kein Gesicht erkannt. Haare und Licht lassen sich trotzdem bearbeiten.');
+    else if (A.faces.length > 1) {
+      toast(`${A.faces.length} Gesichter erkannt. Tippe auf ein Gesicht, um es auszuwählen.`);
+      highlightUntil = performance.now() + 1800;
+      setTimeout(draw, 1850);
+    }
     buildControls();
+    result.getContext('2d').drawImage(original, 0, 0);
+    buildFaces();
     scheduleRender();
   } catch (err) {
     console.error(err);
@@ -288,7 +392,8 @@ for (const id of ['file', 'camera']) {
 }
 $('btn-save').onclick = save;
 $('btn-reset').onclick = () => {
-  state = { ...DEFAULTS };
+  state = newState(A);
+  buildFaces();
   buildControls();
   scheduleRender();
 };
@@ -305,7 +410,11 @@ function moveSplit(e) {
   draw();
 }
 view.addEventListener('pointerdown', (e) => {
-  if (!compare) return;
+  if (!compare) {
+    const i = faceAt(toImage(e));
+    if (i >= 0) selectFace(i);
+    return;
+  }
   view.setPointerCapture(e.pointerId);
   moveSplit(e);
 });

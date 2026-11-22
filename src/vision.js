@@ -12,7 +12,7 @@ export function loadModels() {
         FaceLandmarker.createFromOptions(fileset, {
           baseOptions: { modelAssetPath: new URL('models/face_landmarker.task', base).href, delegate: 'CPU' },
           runningMode: 'IMAGE',
-          numFaces: 4,
+          numFaces: 8,
         }),
         ImageSegmenter.createFromOptions(fileset, {
           baseOptions: {
@@ -50,23 +50,15 @@ function resample(src, sw, sh, w, h) {
   return out;
 }
 
-// Returns landmarks (pixels) of the largest face plus hair / face-skin masks.
+// Returns landmarks (pixels) of every face, ordered left to right, plus
+// hair / face-skin masks.
 export async function detect(canvas) {
   const { landmarker, segmenter } = await loadModels();
   const w = canvas.width, h = canvas.height;
 
-  const faces = landmarker.detect(canvas).faceLandmarks || [];
-  let best = null, bestArea = 0;
-  for (const f of faces) {
-    let x0 = 1, x1 = 0, y0 = 1, y1 = 0;
-    for (const p of f) {
-      x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x);
-      y0 = Math.min(y0, p.y); y1 = Math.max(y1, p.y);
-    }
-    const area = (x1 - x0) * (y1 - y0);
-    if (area > bestArea) { bestArea = area; best = f; }
-  }
-  const landmarks = best ? best.map((p) => [p.x * w, p.y * h]) : null;
+  const faces = (landmarker.detect(canvas).faceLandmarks || [])
+    .map((f) => f.map((p) => [p.x * w, p.y * h]))
+    .sort((a, b) => a[1][0] - b[1][0]);
 
   // selfie_multiclass classes: 0 background, 1 hair, 2 body skin, 3 face skin, 4 clothes, 5 other
   const seg = segmenter.segment(canvas);
@@ -79,5 +71,5 @@ export async function detect(canvas) {
   const faceSkin = take(3);
   masks.forEach((m) => m.close());
 
-  return { landmarks, faceCount: faces.length, hair, faceSkin };
+  return { faces, hair, faceSkin };
 }
