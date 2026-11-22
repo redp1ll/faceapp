@@ -12,6 +12,7 @@ export const FACE_DEFAULTS = {
   shadow: 0, shadowColor: '#7a5a8c',
   iris: 0, irisColor: '#3d8fd1',
   eyeSize: 0,
+  hair: 0, hairColor: '#d9b26f',
   beard: 0, beardColor: '#3a2a20',
   slim: 0, nose: 0, smile: 0, chin: 0,
 };
@@ -30,7 +31,7 @@ export function newState(A) {
 const tmp = [0, 0, 0];
 const tmpC = [0, 0, 0];
 
-// Index mapping from a face's local box into the full image.
+// Index mapping from a local box (box, bw, bh) into the full image.
 function eachInBox(F, w, fn) {
   const [bx, by] = F.box;
   for (let y = 0; y < F.bh; y++) {
@@ -129,6 +130,8 @@ function renderFace(o, F, w, s) {
   recolorFace(o, F, w, F.lips, s.lipColor, s.lip * 0.9, F.lipsMeanL, 0.55);
   recolorFace(o, F, w, F.iris, s.irisColor, s.iris * 0.85, F.irisMeanL, 0.6);
 
+  if (F.hair && s.hair) recolorFace(o, F.hair, w, F.hair.mask, s.hairColor, s.hair * 0.9, F.hair.meanL, 0.85);
+
   if (F.beardLayer && s.beard) {
     // Darker skin under the stubble, then the hairs themselves.
     tintFace(o, F, w, F.beard, s.beardColor, s.beard * s.beard * 0.18);
@@ -153,7 +156,8 @@ export function render(A, state) {
 
   A.faces.forEach((F, i) => renderFace(o, F, w, faces[i]));
 
-  if (A.hair && g.hair) {
+  // Without any detected face, hair colour applies to the whole photo.
+  if (!A.faces.length && A.hair && g.hair) {
     const [col, gamma] = recolorParams(g.hairColor, A.hairMeanL ?? 0.3, 0.85);
     const amount = g.hair * 0.9;
     for (let i = 0; i < n; i++) {

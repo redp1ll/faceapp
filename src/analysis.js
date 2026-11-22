@@ -31,7 +31,50 @@ export function analyze(rgb, w, h, det) {
     A.hairMeanL = meanLum(rgb, A.hair, 0.6);
   }
   A.faces = det.faces.map((lm) => analyzeFace(rgb, w, h, lm, det.faceSkin));
+  if (A.hair && A.faces.length) splitHair(A);
   return A;
+}
+
+// Give every face its own hair mask. Each hair pixel is shared between faces
+// by inverse distance to the head (scaled by face size, raised to a high
+// power), so touching hair of two people splits with a soft seam.
+function splitHair(A) {
+  const { w, h, rgb, hair } = A;
+  const heads = A.faces.map((F) => {
+    const [x0, y0, x1, y1] = F.tight;
+    return [(x0 + x1) / 2 - F.down[0] * F.fw * 0.2, (y0 + y1) / 2 - F.down[1] * F.fw * 0.2, F.fw];
+  });
+  const weight = (x, y, i) => {
+    let own = 0, sum = 0;
+    for (let k = 0; k < heads.length; k++) {
+      const [cx, cy, fw] = heads[k];
+      const d = Math.max(0.05, Math.hypot(x - cx, y - cy) / fw);
+      const v = d > 4 ? 0 : 1 / d ** 8;
+      sum += v;
+      if (k === i) own = v;
+    }
+    return sum ? own / sum : 0;
+  };
+  A.faces.forEach((F, i) => {
+    const [x0, y0, x1, y1] = F.tight;
+    const fw = F.fw;
+    const box = [Math.max(0, Math.floor(x0 - fw * 1.2)), Math.max(0, Math.floor(y0 - fw * 1.0)),
+      Math.min(w, Math.ceil(x1 + fw * 1.2)), Math.min(h, Math.ceil(y1 + fw * 2.5))];
+    const bw = box[2] - box[0], bh = box[3] - box[1];
+    const m = new Float32Array(bw * bh);
+    let s = 0, n = 0;
+    for (let y = 0; y < bh; y++) {
+      for (let x = 0; x < bw; x++) {
+        const gi = (y + box[1]) * w + x + box[0];
+        const v = hair[gi];
+        if (v < 0.02) continue;
+        const k = v * weight(x + box[0], y + box[1], i);
+        m[y * bw + x] = k;
+        if (k > 0.6) { s += 0.3 * rgb[gi * 3] + 0.59 * rgb[gi * 3 + 1] + 0.11 * rgb[gi * 3 + 2]; n++; }
+      }
+    }
+    F.hair = n > 30 ? { box, bw, bh, mask: m, meanL: s / n } : null;
+  });
 }
 
 // All masks of a face live in a local box around it (`F.box`, size bw×bh),

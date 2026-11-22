@@ -15,9 +15,13 @@ Web-App zur Gesichtsbearbeitung. Läuft komplett im Browser (Smartphone und PC).
 | **Form** | Gesicht schmaler, Nase schmaler, Lächeln, Kinnlänge |
 | **Licht** | Helligkeit, Kontrast, Sättigung, Wärme |
 
-**Mehrere Gesichter:** Auf Gruppenfotos wählst du das Gesicht über die Vorschauleiste oder tippst es im Bild an. Jedes Gesicht hat eigene Einstellungen. Haarfarbe und Licht gelten für das ganze Foto.
+**Mehrere Gesichter:** Auf Gruppenfotos wählst du das Gesicht über die Vorschauleiste oder tippst es im Bild an. Jedes Gesicht hat eigene Einstellungen, auch die Haarfarbe: Die Haare werden der nächstgelegenen Person zugeordnet. Nur das Licht gilt für das ganze Foto.
 
 Dazu kommen ein Vorher/Nachher-Vergleich mit verschiebbarer Trennlinie, Speichern als JPEG (auf dem Handy über das Teilen-Menü), Drag & Drop und eine Kamera-Aufnahme.
+
+## Auf dem iPhone
+
+Die App in Safari öffnen, dann **Teilen → Zum Home-Bildschirm**. Danach startet sie wie eine normale App, mit eigenem Symbol und ohne Safari-Leiste. **Speichern** öffnet das iOS-Teilen-Menü, und **„Bild sichern“** legt das Foto in der Fotos-App ab.
 
 ## Wie es funktioniert
 

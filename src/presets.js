@@ -39,7 +39,9 @@ const LIGHT_KEYS = ['brightness', 'contrast', 'saturation', 'warmth'];
 // settings, starting from the defaults so looks don't stack on each other.
 export function applyLook(look, strength, face, global, faceDefaults, globalDefaults) {
   const k = strength / 100;
-  Object.assign(face, faceDefaults);
+  // Hair colour is not part of any look, so keep it.
+  const { hair, hairColor } = face;
+  Object.assign(face, faceDefaults, { hair, hairColor });
   for (const key of LIGHT_KEYS) global[key] = globalDefaults[key];
   for (const [key, v] of Object.entries(look.face)) face[key] = typeof v === 'number' ? Math.round(v * k) : v;
   for (const [key, v] of Object.entries(look.light)) global[key] = Math.round(v * k);

@@ -61,9 +61,11 @@ let A = null; // analysis of the current photo
 let sel = 0; // index of the face being edited
 let highlightUntil = 0;
 
-// Settings of the selected face, or the photo-wide ones (hair, light).
-const bag = (key) => (isFaceKey(key) ? state.faces[sel] : state.global);
-const defaultOf = (key) => (isFaceKey(key) ? FACE_DEFAULTS : GLOBAL_DEFAULTS)[key];
+// Settings of the selected face, or the photo-wide ones (light; hair too
+// when no face was found).
+const perFace = (key) => isFaceKey(key) && A.faces.length > 0;
+const bag = (key) => (perFace(key) ? state.faces[sel] : state.global);
+const defaultOf = (key) => (perFace(key) ? FACE_DEFAULTS : GLOBAL_DEFAULTS)[key];
 let activeTab = 'looks';
 let lookThumbs = null; // { sel, urls } preview images for the selected face
 let compare = false;
@@ -111,8 +113,8 @@ function buildControls() {
     box.innerHTML = '<p class="hint">Auf diesem Foto wurde kein Gesicht erkannt. Haare und Licht lassen sich trotzdem bearbeiten.</p>';
     return;
   }
-  if (tab.id === 'hair' && !A.hair) {
-    box.innerHTML = '<p class="hint">Auf diesem Foto wurden keine Haare erkannt.</p>';
+  if (tab.id === 'hair' && (A.faces.length ? !A.faces[sel].hair : !A.hair)) {
+    box.innerHTML = `<p class="hint">${A.faces.length ? 'Bei dieser Person' : 'Auf diesem Foto'} wurden keine Haare erkannt.</p>`;
     return;
   }
   if (tab.id === 'looks') return buildLooks(box);
@@ -326,6 +328,7 @@ function scheduleRender() {
     result.getContext('2d').putImageData(new ImageData(px, A.w, A.h), 0, 0);
     draw();
     refreshThumb();
+    prepareExport();
   });
 }
 
@@ -449,24 +452,49 @@ async function openFile(file) {
   }
 }
 
-async function save() {
-  if (!A) return;
-  const blob = await new Promise((r) => result.toBlob(r, 'image/jpeg', 0.92));
-  const name = `facette-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.jpg`;
-  const file = new File([blob], name, { type: 'image/jpeg' });
-  if (navigator.canShare?.({ files: [file] }) && matchMedia('(pointer: coarse)').matches) {
-    try {
-      await navigator.share({ files: [file] });
-      return;
-    } catch (e) {
-      if (e.name === 'AbortError') return;
-    }
-  }
+// The JPEG is prepared shortly after every change. iOS Safari only opens
+// the share sheet if navigator.share() is called right inside the tap,
+// without awaiting anything first, so the file must already exist.
+let exportFile = null;
+let exportTimer = 0;
+let exportVersion = 0;
+
+function prepareExport() {
+  exportFile = null;
+  const v = ++exportVersion;
+  clearTimeout(exportTimer);
+  exportTimer = setTimeout(() => {
+    result.toBlob((blob) => {
+      if (v !== exportVersion || !blob) return;
+      const name = `facette-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.jpg`;
+      exportFile = new File([blob], name, { type: 'image/jpeg' });
+    }, 'image/jpeg', 0.92);
+  }, 250);
+}
+
+function download(file) {
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = name;
+  a.href = URL.createObjectURL(file);
+  a.download = file.name;
   a.click();
-  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+}
+
+function save() {
+  if (!A) return;
+  if (!exportFile) {
+    toast('Einen Moment, das Bild wird vorbereitet …', 1500);
+    return;
+  }
+  const file = exportFile;
+  const mobile = matchMedia('(pointer: coarse)').matches;
+  if (mobile && navigator.canShare?.({ files: [file] })) {
+    navigator.share({ files: [file] }).catch((e) => {
+      if (e.name !== 'AbortError') download(file);
+    });
+    return;
+  }
+  download(file);
 }
 
 // ----------------------------------------------------------------- wiring ---
