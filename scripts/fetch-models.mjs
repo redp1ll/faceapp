@@ -1,4 +1,4 @@
-// Copies the MediaPipe WASM runtime into public/ and downloads the two
+// Copies the MediaPipe WASM runtime into public/ and downloads the three
 // open-source models (Apache-2.0, published by Google) the app uses.
 // Runs automatically before `npm run dev` and `npm run build`.
 import { mkdir, copyFile, readdir, stat, writeFile } from 'node:fs/promises';
@@ -11,6 +11,8 @@ const pub = join(root, 'public');
 const MODELS = {
   'face_landmarker.task':
     'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
+  'blaze_face_short_range.tflite':
+    'https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite',
   'selfie_multiclass_256x256.tflite':
     'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_multiclass_256x256/float32/latest/selfie_multiclass_256x256.tflite',
 };

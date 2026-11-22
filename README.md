@@ -29,12 +29,12 @@ Die App in Safari öffnen, dann **Teilen → Zum Home-Bildschirm**. Danach start
 
 ## Wie es funktioniert
 
-- **Gesichtserkennung:** [MediaPipe Face Landmarker](https://ai.google.dev/edge/mediapipe/solutions/vision/face_landmarker) findet 478 Punkte im Gesicht, inklusive Iris.
+- **Gesichtserkennung:** [MediaPipe Face Landmarker](https://ai.google.dev/edge/mediapipe/solutions/vision/face_landmarker) findet 478 Punkte im Gesicht, inklusive Iris. Weil sein Detektor das Foto auf 128 × 128 px verkleinert, würde er kleine Gesichter auf Gruppenfotos übersehen. Deshalb wird das Foto zusätzlich in überlappenden Ausschnitten auf zwei feineren Stufen durchsucht. Jeder Treffer aus einem Ausschnitt wird vom MediaPipe Face Detector (`blaze_face_short_range`) noch einmal bewertet, um Fehltreffer wie Hände oder Bilder an der Wand auszusortieren (`src/vision.js`).
 - **Haare und Gesichtshaut:** Der MediaPipe-Segmentierer `selfie_multiclass_256x256` trennt Haare, Gesichtshaut und Hintergrund.
 - **Masken:** Aus den Punkten werden weiche Masken für Haut, Lippen, Iris, Lidschatten, Rouge und Bart berechnet (`src/analysis.js`).
 - **Effekte:** Umfärben über die Luminanz, Multiplizieren oder Weichzeichnen (`src/render.js`). Gesichtsform über glatte lokale Verformungen (`src/warp.js`).
 
-Beide Modelle stehen unter Apache-2.0. Es gibt keinen Server und keine Cloud-API.
+Alle Modelle stehen unter Apache-2.0. Es gibt keinen Server und keine Cloud-API.
 
 ## Entwicklung
 
